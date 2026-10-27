@@ -24,6 +24,9 @@ var I = {
   folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
   down: '<path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/>',
+  panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="M15 10l-2 2 2 2"/>',
+  chev: '<path d="M6 9l6 6 6-6"/>',
+  more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 011-1h10"/>'
 };
 function ico(n) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + I[n] + '</svg>'; }
@@ -410,7 +413,7 @@ function syncPill(state) {
   var l = syncLabel(state); if (!l) return "";
   return '<button class="status sync-pill" data-sync title="' + esc(M.err || (M.last ? "Last synced " + ago(M.last) : "Google Drive sync")) + '"><i class="dot' + (l[0] === "ok" ? "" : l[0] === "err" ? " err" : " off") + '"></i>' + l[1] + "</button>";
 }
-function refreshSync(state) { $$(".sync-pill").forEach(function (p) { p.outerHTML = syncPill(state); }); var st = $("#syncState"); if (st) st.innerHTML = syncStateHTML(); }
+function refreshSync(state) { $$(".sync-pill").forEach(function (p) { p.outerHTML = syncPill(state); }); var rs = $(".rf-status"); if (rs && typeof railStatus === "function") rs.outerHTML = railStatus(); var st = $("#syncState"); if (st) st.innerHTML = syncStateHTML(); }
 function syncStateHTML() {
   if (!M.on) return '<p class="muted small">Not connected. Progress is saved on this device only.</p>';
   return '<p class="small"><b>Connected.</b> ' + (M.last ? "Last synced " + ago(M.last) + "." : "") + (M.hint ? " Account: " + esc(M.hint) + "." : "") + "</p>" + (M.err ? '<div class="notice">' + esc(M.err) + "</div>" : "");
@@ -542,29 +545,51 @@ document.addEventListener("click", function (e) { var b = e.target.closest("[dat
 
 /* ================= router / shell ================= */
 var NAV = [["home", "Home", "home"], ["learn", "Learn", "learn"], ["speak", "Speak", "speak"], ["write", "Write", "write"], ["coach", "Coach", "coach"]];
+var RSEC = (function () { try { return JSON.parse(localStorage.getItem("speakwell.railsec") || "{}"); } catch (e) { return {}; } })();
+function railOff() { try { return localStorage.getItem("speakwell.railoff") === "1"; } catch (e) { return false; } }
+function applyRail() { var a = $(".app"); if (a) a.classList.toggle("rail-off", railOff()); }
 function shell(active) {
   var bottom = active === "notes" ? "write" : active;
   var t = NAV.map(function (n) { return '<button class="tab" data-go="' + n[0] + '"' + (bottom === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + n[1] + "</button>"; }).join("");
   $("#tabs").innerHTML = t;
-  $("#rail").innerHTML = '<div class="brand">' + logo() + '<b>Speakwell</b></div>' +
-    NAV.map(function (n) { return '<button data-go="' + n[0] + '"' + (active === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + n[1] + "</button>"; }).join("") +
-    '<button data-go="notes"' + (active === "notes" ? ' aria-current="page"' : "") + ">" + ico("note") + 'My notes' + (S.notes.length ? '<span class="rail-count">' + S.notes.length + "</span>" : "") + "</button>" +
-    (active === "notes" ? railNotes() : "") +
-    '<button data-go="progress"' + (active === "progress" ? ' aria-current="page"' : "") + ">" + ico("chart") + 'Progress</button><div class="spacer"></div>' +
-    (isInstalled() ? "" : '<button data-install class="rail-install">' + ico("down") + "Install app</button>") +
-    '<button data-go="settings"' + (active === "settings" ? ' aria-current="page"' : "") + ">" + ico("gear") + "Settings</button>";
+  var navItems = NAV.concat([["progress", "Progress", "chart"]]);
+  var tg = {}; S.notes.forEach(function (n) { (n.tags || []).forEach(function (x) { tg[x] = (tg[x] || 0) + 1; }); });
+  var tags = Object.keys(tg).sort();
+  var acct = railStatus();
+  $("#rail").innerHTML =
+    '<div class="brand">' + logo() + '<b>Speakwell</b><button class="rail-toggle" data-rail-toggle title="Hide sidebar" aria-label="Hide sidebar">' + ico("panel") + "</button></div>" +
+    '<div class="rail-scroll">' +
+    '<div class="rail-nav">' + navItems.map(function (n) { return '<button class="rn-nav" data-go="' + n[0] + '"' + (active === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + "<span>" + n[1] + "</span></button>"; }).join("") + "</div>" +
+    railSection("notes", "Notes", S.notes.length, '<button class="rs-add" data-go="write" title="New draft" aria-label="New draft">+</button>', railNotes(active)) +
+    (tags.length ? railSection("tags", "Tags", "", "", '<div class="rt-list">' + tags.map(function (x) { return '<button class="rt-item' + (NS.tag === x ? " on" : "") + '" data-ntag="' + esc(x) + '"><span class="rt-hash">#</span><span class="rn-t">' + esc(x) + '</span><span class="rt-n">' + tg[x] + "</span></button>"; }).join("") + "</div>") : "") +
+    "</div>" +
+    '<div class="rail-foot">' + acct + (isInstalled() ? "" : '<button class="rn-nav rail-install" data-install>' + ico("down") + "<span>Install app</span></button>") +
+    '<button class="rn-nav" data-go="settings"' + (active === "settings" ? ' aria-current="page"' : "") + ">" + ico("gear") + "<span>Settings</span></button></div>";
+  applyRail();
+  setTimeout(filterRail, 0);
 }
+function railStatus() {
+  return !M.on ? '<button class="rf-status" data-go="settings"><i class="dot off"></i><span><b>Google Drive</b><small>Not connected · tap to set up</small></span></button>'
+    : '<button class="rf-status" data-sync title="Sync now"><i class="dot' + (M.err ? " err" : tokenValid() && !Sync.dirty ? "" : " off") + '"></i><span><b>' + (M.err ? "Sync problem" : tokenValid() ? (Sync.dirty ? "Saving to Drive…" : "Google Drive connected") : "Tap to sync") + "</b><small>" + esc(M.hint || (M.last ? "Last synced " + ago(M.last) : "Google Drive")) + "</small></span></button>";
+}
+function railSection(id, label, count, extra, body) {
+  var open = RSEC[id] !== false;
+  return '<section class="rs' + (open ? " open" : "") + '"><div class="rs-head"><button class="rs-toggle" data-rsec="' + id + '" aria-expanded="' + open + '">' + ico("chev") + "<span>" + label + "</span>" + (count !== "" ? '<i class="rs-n">' + count + "</i>" : "") + "</button>" + extra + '</div><div class="rs-body"' + (open ? "" : " hidden") + ">" + body + "</div></section>";
+}
+document.addEventListener("click", function (e) {
+  var s = e.target.closest("[data-rsec]");
+  if (s) { var id = s.getAttribute("data-rsec"), sec = s.closest(".rs"), open = !sec.classList.contains("open"); sec.classList.toggle("open", open); $(".rs-body", sec).hidden = !open; s.setAttribute("aria-expanded", open); RSEC[id] = open; try { localStorage.setItem("speakwell.railsec", JSON.stringify(RSEC)); } catch (x) {} return; }
+  if (e.target.closest("[data-rail-toggle]")) { var off = !railOff(); try { localStorage.setItem("speakwell.railoff", off ? "1" : "0"); } catch (x) {} applyRail(); }
+});
 function shortTitle(t, n) { t = String(t || "Untitled").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n).replace(/\s+\S*$/, "") + "…" : t; }
-function railNotes() {
-  var curId = ((location.hash || "").match(/note~([\w-]+)/) || [])[1];
+function railNotes(active) {
+  var curId = active === "notes" ? (((location.hash || "").match(/note~([\w-]+)/) || [])[1] || "") : "";
   var list = S.notes.slice().sort(function (a, b) { return b.u - a.u; });
-  if (!curId && list.length) curId = list[0].id;
-  var tg = {}; list.forEach(function (n) { (n.tags || []).forEach(function (t) { tg[t] = 1; }); });
-  return '<div class="rail-notes"><div class="rn-tools"><input id="railQ" type="search" placeholder="Filter notes" value="' + esc(NS.q) + '" aria-label="Filter notes"><button class="icon-btn" data-go="write" title="New draft" aria-label="New draft">+</button></div>' +
-    '<div class="rn-chips"><button class="rn-chip' + (NS.only === "due" ? " on" : "") + '" data-nf="' + (NS.only === "due" ? "all" : "due") + '">Due</button>' + Object.keys(tg).sort().map(function (t) { return '<button class="rn-chip' + (NS.tag === t ? " on" : "") + '" data-ntag="' + esc(t) + '">#' + esc(t) + "</button>"; }).join("") + "</div>" +
+  if (active === "notes" && !curId && list.length) curId = list[0].id;
+  return (list.length > 4 ? '<div class="rn-tools"><input id="railQ" type="search" placeholder="Filter notes" value="' + esc(NS.q) + '" aria-label="Filter notes"><button class="rn-chip' + (NS.only === "due" ? " on" : "") + '" data-nf="' + (NS.only === "due" ? "all" : "due") + '" title="Notes not revised in 3 days">Due</button></div>' : "") +
     '<div class="rn-list">' + list.map(function (n) {
-      return '<button class="rn-item' + (n.id === curId ? " on" : "") + '" data-go="note~' + n.id + '" data-rq="' + esc((n.title + " " + (n.tags || []).join(" ") + " " + n.fixed.slice(0, 300)).toLowerCase()) + '" data-rtags="' + esc((n.tags || []).join(" ")) + '" data-rdue="' + (!n.lastRev || Date.now() - n.lastRev >= 3 * 864e5 ? 1 : 0) + '" title="' + esc(n.title) + '"><span class="rn-t">' + esc(shortTitle(n.title, 34)) + "</span>" + (S.curNote === n.id ? '<i class="rn-dot" title="Open in Write"></i>' : "") + "</button>";
-    }).join("") + (list.length ? "" : '<p class="muted small" style="padding:6px 12px">No notes yet.</p>') + "</div></div>";
+      return '<button class="rn-item' + (n.id === curId ? " on" : "") + '" data-go="note~' + n.id + '" data-rq="' + esc((n.title + " " + (n.tags || []).join(" ") + " " + n.fixed.slice(0, 300)).toLowerCase()) + '" data-rtags="' + esc((n.tags || []).join(" ")) + '" data-rdue="' + (!n.lastRev || Date.now() - n.lastRev >= 3 * 864e5 ? 1 : 0) + '" title="' + esc(n.title) + '">' + ico("note") + '<span class="rn-t">' + esc(shortTitle(n.title, 30)) + "</span>" + (S.curNote === n.id ? '<i class="rn-dot" title="Open in Write"></i>' : "") + "</button>";
+    }).join("") + (list.length ? "" : '<p class="muted small" style="padding:4px 10px">No notes yet. Start writing in Write.</p>') + "</div>";
 }
 function filterRail() {
   $$(".rn-item").forEach(function (b) {
@@ -580,6 +605,8 @@ document.addEventListener("click", function (e) {
   $$(".rail [data-nf]").forEach(function (x) { x.classList.toggle("on", NS.only === "due"); x.setAttribute("data-nf", NS.only === "due" ? "all" : "due"); });
   $$(".rail [data-ntag]").forEach(function (x) { x.classList.toggle("on", x.getAttribute("data-ntag") === NS.tag); });
   filterRail();
+  var v0 = (location.hash || "").slice(1).split("~")[0];
+  if (r.hasAttribute("data-ntag") && v0 !== "notes" && v0 !== "note") go("notes");
 }, true);
 function logo() { return '<svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--accent)"/><path d="M9 20c3 3 11 3 14-1M10 12h4M18 12h4" stroke="var(--accent-ink)" stroke-width="2.6" stroke-linecap="round" fill="none"/></svg>'; }
 document.addEventListener("click", function (e) {
@@ -588,7 +615,7 @@ document.addEventListener("click", function (e) {
 function go(h) { if (location.hash === "#" + h) route(); else location.hash = h; }
 function top(title, opts) {
   opts = opts || {};
-  return '<div class="topbar">' + (opts.back ? '<button class="back" aria-label="Back" data-go="' + opts.back + '">' + ico("back") + "</button>" : "") +
+  return '<div class="topbar"><button class="rail-show" data-rail-toggle title="Show sidebar" aria-label="Show sidebar">' + ico("panel") + "</button>" + (opts.back ? '<button class="back" aria-label="Back" data-go="' + opts.back + '">' + ico("back") + "</button>" : "") +
     '<div class="grow">' + (opts.eyebrow ? '<div class="eyebrow">' + esc(opts.eyebrow) + "</div>" : "") + "<h1>" + title + "</h1></div>" + syncPill() + statusPill() +
     (opts.noGear ? "" : '<button class="icon-btn" aria-label="Settings" data-go="settings">' + ico("gear") + "</button>") + "</div>";
 }
@@ -1728,14 +1755,17 @@ VIEWS.notes = function (m, id) {
     }).join("");
     var rest = fx.filter(function (f, i) { return !used[i]; });
     return '<div class="nd">' + (wide ? "" : '<button class="btn sm ghost" data-go="notes">' + ico("back") + "All notes</button>") +
-      '<label class="eyebrow" for="ndTitle">Title</label><div class="nd-titlewrap"><input class="nd-title" id="ndTitle" value="' + esc(n.title) + '" placeholder="Add a title"><span class="muted" aria-hidden="true">' + ico("write") + "</span></div>" +
-      '<p class="muted small">' + new Date(n.t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + " · " + esc(n.source || "") + " · " + wordCount(n.fixed) + " words" + (n.revised ? " · revised " + n.revised + "×" : "") + "</p>" +
+      '<div class="nd-titlewrap"><input class="nd-title" id="ndTitle" value="' + esc(n.title) + '" placeholder="Add a title" aria-label="Note title"><span class="muted" aria-hidden="true">' + ico("write") + "</span></div>" +
+      '<p class="muted small">' + new Date(n.t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + (n.source ? " · " + esc(n.source) : "") + " · " + wordCount(n.fixed) + " words" + (n.revised ? " · revised " + n.revised + "×" : "") + "</p>" +
       '<div id="ndTags">' + tagEditorHTML(n) + "</div>" +
       (noteTags(n).length ? '<div class="nl-tags"><span class="muted small">Topics:</span>' + noteTags(n).map(function (t) { return "<i>#" + esc(t) + "</i>"; }).join("") + "</div>" : "") +
-      '<div class="nd-stats"><div><b>' + ch.length + "</b><span>sentences fixed</span></div><div><b>" + (pairs.length - ch.length) + "</b><span>already correct</span></div><div><b>" + fx.length + "</b><span>corrections</span></div></div>" +
+      '<div class="nd-meta"><span class="pill ' + (ch.length ? "warn" : "ok") + '">' + ch.length + " fixed</span><span class=\"pill ok\">" + (pairs.length - ch.length) + ' correct</span><span class="pill">' + fx.length + " correction" + (fx.length === 1 ? "" : "s") + "</span></div>" +
       '<div class="row tight"><button class="btn sm" data-a="say">' + ico("play") + 'Hear correct</button><button class="btn sm" data-a="rev">' + ico("ok") + 'Revised</button><button class="btn sm" data-a="share">' + ico("share") + 'Share</button><button class="btn sm primary" data-a="edit">' + ico("write") + 'Edit draft</button>' +
-      (n.pending ? '<button class="btn sm primary" data-a="ai">Correct with AI</button>' : "") + '<button class="btn sm ghost" data-a="del" style="color:var(--bad)">Delete</button>' +
-      '<span class="row tight" id="ndConf" hidden><span class="small">Delete this note?</span><button class="btn sm" data-a="delY" style="color:var(--bad)">Yes</button><button class="btn sm" data-a="delN">No</button></span></div>' +
+      (n.pending ? '<button class="btn sm primary" data-a="ai">Correct with AI</button>' : "") +
+      '<details class="more"><summary class="btn sm" aria-label="More actions">' + ico("more") + '</summary><div class="more-menu">' +
+      (S.notes.length > 1 ? '<label class="small muted" for="ndMerge">Merge another note into this one</label><div class="row tight" style="flex-wrap:nowrap"><select id="ndMerge" style="min-width:0;flex:1"><option value="">Choose a note…</option>' + S.notes.filter(function (x) { return x.id !== n.id; }).sort(function (a, b) { return b.u - a.u; }).map(function (x) { return '<option value="' + x.id + '">' + esc(shortTitle(x.title, 40)) + " · " + relDate(x.u) + "</option>"; }).join("") + '</select><button class="btn sm" data-a="merge">Merge</button></div><hr class="sep">' : "") +
+      '<button class="btn sm ghost" data-a="del" style="color:var(--bad);justify-content:flex-start">Delete note</button>' +
+      '<span class="row tight" id="ndConf" hidden><span class="small">Delete this note?</span><button class="btn sm" data-a="delY" style="color:var(--bad)">Yes, delete</button><button class="btn sm" data-a="delN">No</button></span></div></details></div>' +
       '<div class="card share-panel" id="ndShare"' + (NS.share === n.id ? "" : " hidden") + '><h3>Share this note</h3>' +
       '<div class="row tight">' + (navigator.share ? '<button class="btn sm primary" data-a="shSys">' + ico("share") + "Share…</button>" : "") +
       '<a class="btn sm" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(shareText(n, false)) + '">WhatsApp</a>' +
@@ -1747,7 +1777,6 @@ VIEWS.notes = function (m, id) {
         (n.docPublic ? '<div class="row tight" style="flex-wrap:nowrap"><input type="text" readonly value="' + esc(n.docLink) + '" id="shLink" style="min-width:0"><button class="btn sm" data-a="shLinkCopy">Copy link</button></div>' : "")
         : '<div class="row tight"><button class="btn sm" data-a="shDoc">Save as Google Doc</button></div>') +
       '<p class="small" id="shMsg" aria-live="polite"></p></div></div>' +
-      (S.notes.length > 1 ? '<div class="row tight"><label class="small muted" for="ndMerge">Merge another note into this one</label><select id="ndMerge" style="width:auto;min-width:0;flex:1;max-width:340px"><option value="">Choose a note…</option>' + S.notes.filter(function (x) { return x.id !== n.id; }).sort(function (a, b) { return b.u - a.u; }).map(function (x) { return '<option value="' + x.id + '">' + esc(x.title) + " · " + relDate(x.u) + "</option>"; }).join("") + '</select><button class="btn sm" data-a="merge">Merge</button></div>' : "") +
       '<div class="section"><h2>Full text</h2><div class="nm-grid"><div class="nm-box nm-wrong"><span class="eyebrow">Your version (draft)</span><p class="hbody" data-sel>' + linkify(esc(n.orig), n.links) + '</p></div><div class="nm-box nm-right"><span class="eyebrow">Correct</span><p class="hbody" data-sel>' + linkify(esc(n.fixed), n.links) + "</p></div></div>" +
       '<div id="ndLinks">' + linksHTML(n, n.fixed) + '</div><p class="muted small">Select any word or sentence above, then press Ctrl+K or right-click to add a link.</p></div>' +
       '<div class="section"><div class="row" style="justify-content:space-between"><h2>Attachments</h2><span class="muted small">Saved in Google Drive › Speakwell › Attachments</span></div>' + dropZoneHTML("ndDrop") + '<div id="ndAttList">' + attListHTML(n) + "</div></div>" +
@@ -1961,6 +1990,9 @@ VIEWS.settings = function (m) {
   $("#sResetY").onclick = function () { var st = S.settings, nm = S.name; S = JSON.parse(JSON.stringify(defaults)); S.settings = st; S.name = nm; S.resetAt = Date.now(); recount(S); save(); toast("Progress reset" + (M.on ? " on all synced devices" : "")); go("home"); };
 };
 
+document.addEventListener("keydown", function (e) {
+  if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "n") { e.preventDefault(); var nb = $("#newB"); if (nb) nb.click(); else { S.curNote = ""; S.draft = ""; S.draftT = Date.now(); save(); go("write"); } }
+});
 /* ================= boot ================= */
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
