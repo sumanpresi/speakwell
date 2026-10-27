@@ -25,29 +25,68 @@ function ico(n) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 
 /* ================= state ================= */
 var KEY = "speakwell.v1";
+/* Data model is merge-safe so several devices can sync through Google Drive:
+   - counters are kept per device (counts[deviceId]) and summed
+   - active days are a set, streak is computed from it
+   - lessons, sessions, history and chats carry timestamps and are unioned */
 var defaults = {
-  name: "", xp: 0, streak: 0, lastDay: "", done: {}, quiz: { right: 0, total: 0 },
-  sessions: [], writes: 0, chats: {},
+  name: "", done: {}, days: {}, counts: {}, sessions: [], history: [], chats: {}, chatsT: {}, draft: "", draftT: 0,
+  resetAt: 0, historyClearedAt: 0, updatedAt: 0,
+  xp: 0, streak: 0, writes: 0, quiz: { right: 0, total: 0 },
   settings: { apiKey: "", baseUrl: "https://api.openai.com/v1", model: "gpt-5.6-luna", transcribeModel: "gpt-4o-mini-transcribe",
     lang: "en-IN", voice: "", rate: 0.95, theme: "system", coachReplies: true, speakReplies: false, level: "intermediate" }
 };
+var M = loadMeta();   /* device-only: sync state, device id */
+function loadMeta() {
+  var m = {}; try { m = JSON.parse(localStorage.getItem("speakwell.meta") || "{}"); } catch (e) {}
+  if (!m.dev) m.dev = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  return Object.assign({ on: false, fileId: "", last: 0, err: "", clientId: "", hint: "", syncKey: false }, m);
+}
+function saveMeta() { try { localStorage.setItem("speakwell.meta", JSON.stringify(M)); } catch (e) {} }
+saveMeta();
 var S = load();
 function load() {
-  try {
-    var raw = localStorage.getItem(KEY);
-    if (raw) { var o = JSON.parse(raw); o.settings = Object.assign({}, defaults.settings, o.settings || {}); return Object.assign({}, JSON.parse(JSON.stringify(defaults)), o); }
-  } catch (e) {}
-  return JSON.parse(JSON.stringify(defaults));
+  var o = null;
+  try { var raw = localStorage.getItem(KEY); if (raw) o = JSON.parse(raw); } catch (e) {}
+  var s = JSON.parse(JSON.stringify(defaults));
+  if (o) { s = Object.assign(s, o); s.settings = Object.assign({}, defaults.settings, o.settings || {}); }
+  /* migrate v1 data (single counters) into the per-device model */
+  if (o && !o.counts) {
+    s.counts = {}; s.counts[M.dev] = { xp: o.xp || 0, writes: o.writes || 0, qr: (o.quiz && o.quiz.right) || 0, qt: (o.quiz && o.quiz.total) || 0 };
+    s.days = {};
+    if (o.lastDay) { var p = o.lastDay.split("-"), d = new Date(+p[0], +p[1] - 1, +p[2]); for (var i = 0; i < (o.streak || 1); i++) { s.days[dayKey(new Date(d - i * 864e5))] = 1; } }
+    Object.keys(s.done).forEach(function (k) { if (s.done[k] === 1) s.done[k] = Date.now(); });
+    try { var dr = localStorage.getItem("speakwell.draft"); if (dr) { s.draft = dr; s.draftT = Date.now(); } } catch (e) {}
+  }
+  recount(s);
+  return s;
 }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
-function today() { var d = new Date(); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); }
-function yesterday() { var d = new Date(Date.now() - 864e5); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); }
+function dayKey(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function today() { return dayKey(new Date()); }
+function recount(s) {
+  var t = { xp: 0, writes: 0, qr: 0, qt: 0 };
+  Object.keys(s.counts || {}).forEach(function (k) { var c = s.counts[k]; t.xp += c.xp || 0; t.writes += c.writes || 0; t.qr += c.qr || 0; t.qt += c.qt || 0; });
+  s.xp = t.xp; s.writes = t.writes; s.quiz = { right: t.qr, total: t.qt };
+  var n = 0, d = new Date();
+  if (!s.days[dayKey(d)]) d = new Date(d - 864e5);
+  while (s.days[dayKey(d)]) { n++; d = new Date(d - 864e5); }
+  s.streak = n;
+}
+function mine() { if (!S.counts[M.dev]) S.counts[M.dev] = { xp: 0, writes: 0, qr: 0, qt: 0 }; return S.counts[M.dev]; }
+function bump(field, n) { mine()[field] = (mine()[field] || 0) + (n == null ? 1 : n); S.days[today()] = 1; recount(S); }
+function saveLocal() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+function save() { S.updatedAt = Date.now(); saveLocal(); markDirty(); }
 function addXP(n, why) {
-  S.xp += n;
-  var t = today();
-  if (S.lastDay !== t) { S.streak = S.lastDay === yesterday() ? S.streak + 1 : 1; S.lastDay = t; }
+  bump("xp", n);
   save();
   if (why) toast("+" + n + " XP · " + why);
+}
+/* Correction history: every fix, check and piece of feedback */
+function logHistory(kind, title, input, output) {
+  var cut = function (x) { x = String(x || ""); return x.length > 4000 ? x.slice(0, 4000) + "…" : x; };
+  S.history.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t: Date.now(), kind: kind, title: title, input: cut(input), output: cut(output) });
+  if (S.history.length > 600) S.history = S.history.slice(-600);
+  save();
 }
 function applyTheme() {
   var t = S.settings.theme;
@@ -190,7 +229,172 @@ function transcribe(blob) {
     method: "POST", headers: { "Authorization": "Bearer " + s.apiKey }, body: fd
   }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error((j.error && j.error.message) || "Transcription failed"); return j.text || ""; }); });
 }
-var COACH_BASE = "You are Speakwell, a warm, practical English speaking and writing coach for an adult professional in India who wants to sound clear and confident at work and with friends. Level: {level}. Use simple, natural, global English. Keep replies short (under 120 words) unless asked for more.";
+/* ================= Google Drive sync ================= */
+/* Uses the drive.file scope: the app can only see files it created itself.
+   Data lives at  My Drive / Speakwell / speakwell-data.json  */
+var DEFAULT_CLIENT = "399582350522-hiqi4bqev0kjqkt9iljd687qe3g13o9o.apps.googleusercontent.com";
+var GSCOPE = "https://www.googleapis.com/auth/drive.file";
+var FILE_NAME = "speakwell-data.json", FOLDER_NAME = "Speakwell", FOLDER_MIME = "application/vnd.google-apps.folder";
+var Sync = { token: null, exp: 0, busy: null, timer: null, dirty: false };
+try { var tk0 = JSON.parse(localStorage.getItem("speakwell.gtoken") || "null"); if (tk0 && tk0.exp > Date.now() + 60000) { Sync.token = tk0.token; Sync.exp = tk0.exp; } } catch (e) {}
+function tokenValid() { return !!Sync.token && Sync.exp > Date.now() + 60000; }
+function loadGIS() {
+  return new Promise(function (res, rej) {
+    if (window.google && google.accounts && google.accounts.oauth2) return res();
+    var s = document.createElement("script"); s.src = "https://accounts.google.com/gsi/client"; s.async = true;
+    s.onload = function () { res(); }; s.onerror = function () { rej(new Error("Couldn't load Google sign-in. Check your connection.")); };
+    document.head.appendChild(s);
+  });
+}
+function getToken() {
+  if (tokenValid()) return Promise.resolve(Sync.token);
+  if (!online()) return Promise.reject(new Error("You're offline. Changes are saved on this device and will sync when you're back online."));
+  return loadGIS().then(function () {
+    return new Promise(function (res, rej) {
+      var tc = google.accounts.oauth2.initTokenClient({
+        client_id: M.clientId || DEFAULT_CLIENT, scope: GSCOPE, prompt: M.on ? "" : "consent", login_hint: M.hint || undefined,
+        callback: function (r) {
+          if (r.error) return rej(new Error("Google sign-in: " + (r.error_description || r.error)));
+          Sync.token = r.access_token; Sync.exp = Date.now() + (Number(r.expires_in) || 3600) * 1000;
+          try { localStorage.setItem("speakwell.gtoken", JSON.stringify({ token: Sync.token, exp: Sync.exp })); } catch (e) {}
+          res(Sync.token);
+        },
+        error_callback: function (e) { rej(new Error(e && e.type === "popup_closed" ? "The Google sign-in window was closed." : e && e.type === "popup_failed_to_open" ? "Chrome blocked the Google sign-in window. Allow pop-ups for this site and try again." : "Google sign-in failed.")); }
+      });
+      tc.requestAccessToken();
+    });
+  });
+}
+function gfetch(url, opt) {
+  opt = opt || {}; opt.headers = Object.assign({ Authorization: "Bearer " + Sync.token }, opt.headers || {});
+  return fetch(url, opt).then(function (r) {
+    if (r.status === 401) { Sync.token = null; try { localStorage.removeItem("speakwell.gtoken"); } catch (e) {} var e1 = new Error("Google sign-in expired. Tap Sync to reconnect."); e1.status = 401; throw e1; }
+    if (!r.ok) return r.text().then(function (t) {
+      var m = "Google Drive error " + r.status; try { m = JSON.parse(t).error.message; } catch (e) {}
+      if (/has not been used|is disabled/i.test(m)) m = "The Google Drive API is turned off for this Google Cloud project. Turn it on (see Settings → Google Drive sync → How to set up).";
+      var e2 = new Error(m); e2.status = r.status; throw e2;
+    });
+    return r;
+  });
+}
+var DAPI = "https://www.googleapis.com/drive/v3/files", UAPI = "https://www.googleapis.com/upload/drive/v3/files";
+function dfind(name, mime) {
+  var q = "name='" + name + "' and trashed=false" + (mime ? " and mimeType='" + mime + "'" : "");
+  return gfetch(DAPI + "?spaces=drive&orderBy=modifiedTime desc&fields=files(id,modifiedTime)&q=" + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (j) { return j.files && j.files[0]; });
+}
+function dfolder() {
+  return dfind(FOLDER_NAME, FOLDER_MIME).then(function (f) {
+    if (f) return f.id;
+    return gfetch(DAPI + "?fields=id", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: FOLDER_NAME, mimeType: FOLDER_MIME }) }).then(function (r) { return r.json(); }).then(function (j) { return j.id; });
+  });
+}
+function dcreate(body) {
+  return dfolder().then(function (fid) {
+    var b = "speakwell" + Date.now(), meta = { name: FILE_NAME, parents: [fid], mimeType: "application/json", description: "Speakwell English coach: progress and correction history" };
+    var data = "--" + b + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + JSON.stringify(meta) + "\r\n--" + b + "\r\nContent-Type: application/json\r\n\r\n" + body + "\r\n--" + b + "--";
+    return gfetch(UAPI + "?uploadType=multipart&fields=id", { method: "POST", headers: { "Content-Type": "multipart/related; boundary=" + b }, body: data }).then(function (r) { return r.json(); }).then(function (j) { return j.id; });
+  });
+}
+function dupdate(id, body) { return gfetch(UAPI + "/" + id + "?uploadType=media", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: body }); }
+function dread(id) { return gfetch(DAPI + "/" + id + "?alt=media").then(function (r) { return r.json(); }); }
+
+function forDrive(s) { var c = JSON.parse(JSON.stringify(s)); if (!M.syncKey) c.settings.apiKey = ""; delete c.settings.voice; return c; }
+function merge(a, b) {
+  var R = Math.max(a.resetAt || 0, b.resetAt || 0), aOld = (a.resetAt || 0) < R, bOld = (b.resetAt || 0) < R;
+  var H = Math.max(a.historyClearedAt || 0, b.historyClearedAt || 0, R);
+  var src = aOld ? [b] : bOld ? [a] : [a, b];
+  var out = JSON.parse(JSON.stringify(a));
+  out.resetAt = R; out.historyClearedAt = Math.max(a.historyClearedAt || 0, b.historyClearedAt || 0);
+  out.done = {};
+  [a, b].forEach(function (s) { Object.keys(s.done || {}).forEach(function (k) { var t = s.done[k]; if (t > R) out.done[k] = Math.max(out.done[k] || 0, t); }); });
+  out.days = {}; src.forEach(function (s) { Object.keys(s.days || {}).forEach(function (k) { out.days[k] = 1; }); });
+  out.counts = {};
+  src.forEach(function (s) { Object.keys(s.counts || {}).forEach(function (dv) {
+    var c = s.counts[dv], o = out.counts[dv] || { xp: 0, writes: 0, qr: 0, qt: 0 };
+    out.counts[dv] = { xp: Math.max(o.xp, c.xp || 0), writes: Math.max(o.writes, c.writes || 0), qr: Math.max(o.qr, c.qr || 0), qt: Math.max(o.qt, c.qt || 0) };
+  }); });
+  function union(x, y, idk, tk, cutoff, cap) {
+    var m = {}; (x || []).concat(y || []).forEach(function (e) { if (e[tk] > cutoff) m[e[idk]] = e; });
+    return Object.keys(m).map(function (k) { return m[k]; }).sort(function (p, q) { return p[tk] - q[tk]; }).slice(-cap);
+  }
+  out.sessions = union(a.sessions, b.sessions, "d", "d", R, 300);
+  out.history = union(a.history, b.history, "id", "t", H, 600);
+  out.chats = {}; out.chatsT = {};
+  Object.keys(Object.assign({}, a.chats, b.chats)).forEach(function (k) {
+    var ta = (a.chatsT || {})[k] || 0, tb = (b.chatsT || {})[k] || 0, w = tb > ta ? b : a, t = Math.max(ta, tb);
+    if (t > R || (!ta && !tb)) { out.chats[k] = (w.chats || {})[k] || []; out.chatsT[k] = t; }
+  });
+  if ((b.draftT || 0) > (a.draftT || 0)) { out.draft = b.draft; out.draftT = b.draftT; }
+  var newer = (b.updatedAt || 0) > (a.updatedAt || 0) ? b : a;
+  out.name = newer.name || a.name || b.name || "";
+  if (newer === b && b.settings) {
+    var keep = { apiKey: a.settings.apiKey, voice: a.settings.voice };
+    out.settings = Object.assign({}, defaults.settings, b.settings, keep);
+    if (!keep.apiKey && b.settings.apiKey) out.settings.apiKey = b.settings.apiKey;
+  } else if (!a.settings.apiKey && b.settings && b.settings.apiKey) out.settings.apiKey = b.settings.apiKey;
+  out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
+  recount(out);
+  return out;
+}
+function syncNow(interactive) {
+  if (Sync.busy) return Sync.busy;
+  M.err = ""; refreshSync("busy");
+  Sync.busy = getToken().then(function () {
+    var find = M.fileId ? Promise.resolve({ id: M.fileId }) : dfind(FILE_NAME);
+    return find.then(function (f) {
+      if (!f) return null;
+      M.fileId = f.id;
+      return dread(f.id).catch(function (e) { if (e.status === 404) { M.fileId = ""; return dfind(FILE_NAME).then(function (g) { if (!g) return null; M.fileId = g.id; return dread(g.id); }); } throw e; });
+    });
+  }).then(function (remote) {
+    if (remote && remote.app === "speakwell" && remote.data) { S = merge(S, remote.data); applyTheme(); }
+    saveLocal();
+    var payload = JSON.stringify({ app: "speakwell", v: 2, savedAt: Date.now(), data: forDrive(S) });
+    return M.fileId ? dupdate(M.fileId, payload) : dcreate(payload).then(function (id) { M.fileId = id; });
+  }).then(function () {
+    M.on = true; M.last = Date.now(); M.err = ""; Sync.dirty = false; saveMeta(); refreshSync();
+  }).catch(function (e) {
+    M.err = e.message; saveMeta(); refreshSync(); if (interactive) toast(e.message); throw e;
+  }).then(function (x) { Sync.busy = null; return x; }, function (e) { Sync.busy = null; throw e; });
+  return Sync.busy;
+}
+function markDirty() {
+  Sync.dirty = true;
+  if (typeof refreshSync === "function") refreshSync();
+  if (!M.on || !tokenValid() || !online()) return;
+  clearTimeout(Sync.timer); Sync.timer = setTimeout(function () { syncNow(false).catch(function () {}); }, 12000);
+}
+document.addEventListener("visibilitychange", function () {
+  if (document.visibilityState === "hidden" && Sync.dirty && M.on && tokenValid() && online()) { clearTimeout(Sync.timer); syncNow(false).catch(function () {}); }
+});
+function ago(t) { var s = Math.round((Date.now() - t) / 1000); if (s < 60) return "just now"; if (s < 3600) return Math.round(s / 60) + " min ago"; if (s < 86400) return Math.round(s / 3600) + " h ago"; return new Date(t).toLocaleDateString(); }
+function syncLabel(state) {
+  if (!M.on) return null;
+  if (state === "busy" || Sync.busy) return ["busy", "Syncing…"];
+  if (M.err) return ["err", "Sync error"];
+  if (!online()) return ["off", Sync.dirty ? "Will sync" : "Drive"];
+  if (!tokenValid()) return ["off", "Tap to sync"];
+  if (Sync.dirty) return ["off", "Saving…"];
+  return ["ok", "Synced"];
+}
+function syncPill(state) {
+  var l = syncLabel(state); if (!l) return "";
+  return '<button class="status sync-pill" data-sync title="' + esc(M.err || (M.last ? "Last synced " + ago(M.last) : "Google Drive sync")) + '"><i class="dot' + (l[0] === "ok" ? "" : l[0] === "err" ? " err" : " off") + '"></i>' + l[1] + "</button>";
+}
+function refreshSync(state) { $$(".sync-pill").forEach(function (p) { p.outerHTML = syncPill(state); }); var st = $("#syncState"); if (st) st.innerHTML = syncStateHTML(); }
+function syncStateHTML() {
+  if (!M.on) return '<p class="muted small">Not connected. Progress is saved on this device only.</p>';
+  return '<p class="small"><b>Connected.</b> ' + (M.last ? "Last synced " + ago(M.last) + "." : "") + (M.hint ? " Account: " + esc(M.hint) + "." : "") + "</p>" + (M.err ? '<div class="notice">' + esc(M.err) + "</div>" : "");
+}
+var SAFE_VIEWS = ["home", "learn", "progress", "history", "speak", "settings", "write"];
+function afterSync() { var v = (location.hash || "#home").slice(1).split("~")[0]; if (SAFE_VIEWS.indexOf(v) > -1 && !document.activeElement.matches("textarea,input")) route(); }
+document.addEventListener("click", function (e) {
+  if (!e.target.closest("[data-sync]")) return;
+  e.preventDefault();
+  syncNow(true).then(function () { toast("Synced with Google Drive"); afterSync(); }).catch(function () {});
+});
+
+var COACH_BASE ="You are Speakwell, a warm, practical English speaking and writing coach for an adult professional in India who wants to sound clear and confident at work and with friends. Level: {level}. Use simple, natural, global English. Keep replies short (under 120 words) unless asked for more.";
 
 /* ================= offline analysis ================= */
 var STOP = "the a an and or but to of in on at for with is are was were be been it this that i you we they he she my our your their me us them as so if not do does did have has had will would can could just".split(" ");
@@ -291,7 +495,7 @@ function go(h) { if (location.hash === "#" + h) route(); else location.hash = h;
 function top(title, opts) {
   opts = opts || {};
   return '<div class="topbar">' + (opts.back ? '<button class="back" aria-label="Back" data-go="' + opts.back + '">' + ico("back") + "</button>" : "") +
-    '<div class="grow">' + (opts.eyebrow ? '<div class="eyebrow">' + esc(opts.eyebrow) + "</div>" : "") + "<h1>" + title + "</h1></div>" + statusPill() +
+    '<div class="grow">' + (opts.eyebrow ? '<div class="eyebrow">' + esc(opts.eyebrow) + "</div>" : "") + "<h1>" + title + "</h1></div>" + syncPill() + statusPill() +
     (opts.noGear ? "" : '<button class="icon-btn" aria-label="Settings" data-go="settings">' + ico("gear") + "</button>") + "</div>";
 }
 function statusPill() {
@@ -309,7 +513,7 @@ function route() {
   var h = (location.hash || "#home").slice(1);
   var parts = h.split("~"), v = parts[0], arg = parts[1];
   var m = $("#main");
-  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress" }[v] || "home";
+  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress" }[v] || "home";
   shell(tab);
   var fn = VIEWS[v] || VIEWS.home;
   m.innerHTML = "";
@@ -347,6 +551,7 @@ VIEWS.home = function (m) {
     tile("learn", "Grammar library", SW.lessons.length + " lessons with quizzes, from parts of speech to punctuation.") +
     tile("words", "Confused words", SW.confused.length + " pairs like affect/effect, with a quiz.") +
     tile("builder", "Sentence builder", "Build S + V + O sentences and hear them.") +
+    tile("history", "Correction history", (S.history.length ? S.history.length + " saved corrections and feedback" : "Every fix and piece of feedback, saved and synced") + ".") +
     "</div></div>" +
     (S.settings.apiKey ? "" : '<div class="section"><div class="notice info"><b>Turn on the AI coach.</b> Add your OpenAI API key and model in <a href="#settings">Settings</a>. Everything else in the app works without it, including offline.</div></div>') +
     (S.name ? "" : '<div class="section card"><label class="f" for="nm">What should I call you?<input id="nm" type="text" placeholder="Your first name" autocomplete="given-name"></label><div class="row" style="margin-top:10px"><button class="btn primary" id="nmSave">Save</button></div></div>');
@@ -397,17 +602,17 @@ VIEWS.lesson = function (m, id) {
   m.innerHTML = html;
   if (l.builder) builder($("#bld"));
   renderQuiz($("#lq"), l.quiz, false);
-  $("#doneB").onclick = function () { if (!S.done[l.id]) { S.done[l.id] = 1; addXP(20, "lesson complete"); } this.textContent = "Completed ✓"; };
+  $("#doneB").onclick = function () { if (!S.done[l.id]) { S.done[l.id] = Date.now(); addXP(20, "lesson complete"); } this.textContent = "Completed ✓"; };
   aiBox($("#askB"), $("#askT"), $("#askO"), function (q) {
     return [{ role: "system", content: COACH_BASE.replace("{level}", S.settings.level) + " The learner is studying the grammar topic: " + l.title + ". Explain with short examples. If they give a sentence, correct it and explain the rule in one line." }, { role: "user", content: q }];
-  });
+  }, ["grammar", "Grammar: " + l.title]);
 };
 
-function aiBox(btn, input, out, build) {
+function aiBox(btn, input, out, build, logAs) {
   btn.onclick = function () {
     var q = input.value.trim(); if (!q) { input.focus(); return; }
     out.innerHTML = '<p class="muted">Thinking…</p>'; btn.disabled = true;
-    aiCall(build(q)).then(function (r) { out.innerHTML = mdLite(r); }).catch(function (e) { out.innerHTML = '<div class="notice">' + esc(e.message) + "</div>"; }).then(function () { btn.disabled = false; });
+    aiCall(build(q)).then(function (r) { out.innerHTML = mdLite(r); if (logAs) logHistory(logAs[0], logAs[1], q, r); }).catch(function (e) { out.innerHTML = '<div class="notice">' + esc(e.message) + "</div>"; }).then(function () { btn.disabled = false; });
   };
 }
 
@@ -425,7 +630,7 @@ function renderQuiz(el, qs, track) {
         b.classList.add(ok ? "right" : "wrong");
         $$(".opt", box)[q.a].classList.add("right");
         var w = $(".why", box); w.hidden = false; w.textContent = (ok ? "Correct. " : "Not quite. ") + q.why;
-        S.quiz.total++; if (ok) { S.quiz.right++; addXP(5); } else save();
+        bump("qt"); if (ok) { bump("qr"); addXP(5); } else { logHistory("quiz", "Quiz mistake", q.q + "\nYour answer: " + q.o[j], "Correct: " + q.o[q.a] + ". " + q.why); }
         if (track) track(ok);
       };
     });
@@ -574,6 +779,7 @@ function recorder(el, opt) {
       '<ul class="feedback">' + r.feedback.map(function (f) { return '<li class="' + f[0] + '">' + esc(f[1]) + "</li>"; }).join("") + "</ul>";
     S.sessions.push({ d: Date.now(), sc: opt.scene || opt.kind || "free", score: r.score, wpm: r.wpm, fillers: r.fillers, words: r.words });
     if (S.sessions.length > 300) S.sessions = S.sessions.slice(-300);
+    logHistory("speaking", "Speaking check · score " + r.score, t, r.feedback.map(function (f) { return "• " + f[1]; }).join("\n"));
     addXP(15, "speaking session");
   };
   $("#aiB", el).onclick = function () {
@@ -581,7 +787,7 @@ function recorder(el, opt) {
     var out = document.createElement("div"); out.className = "card ai-out"; out.innerHTML = '<p class="muted">Getting feedback…</p>'; $("#res", el).appendChild(out);
     var sys = COACH_BASE.replace("{level}", S.settings.level) + " Evaluate a SPOKEN answer (transcribed by speech recognition, so ignore missing punctuation and minor recognition errors). Give: 1) a score out of 10 for clarity, structure, grammar and confidence; 2) the 3 most important grammar or word-choice corrections as 'You said → Better'; 3) one structure tip" + (opt.framework ? " using the " + opt.framework.name + " framework (" + opt.framework.steps.map(function (x) { return x[0]; }).join(", ") + ")" : "") + "; 4) a polished model answer of similar length in natural spoken English. Use short bullet points.";
     aiCall([{ role: "system", content: sys }, { role: "user", content: "Task: " + (opt.prompt || "free speaking") + (secs ? "\nDuration: " + Math.round(secs) + " seconds" : "") + "\n\nMy answer:\n" + t }])
-      .then(function (r) { out.innerHTML = mdLite(r) + '<div class="row" style="margin-top:8px"><button class="btn sm" data-say="' + esc(r.split(/model answer/i)[1] || r) + '">' + ico("play") + "Hear it</button></div>"; addXP(5); })
+      .then(function (r) { out.innerHTML = mdLite(r) + '<div class="row" style="margin-top:8px"><button class="btn sm" data-say="' + esc(r.split(/model answer/i)[1] || r) + '">' + ico("play") + "Hear it</button></div>"; logHistory("speaking", "AI speaking feedback", t, r); addXP(5); })
       .catch(function (e) { out.innerHTML = '<div class="notice">' + esc(e.message) + "</div>"; });
   };
 }
@@ -662,7 +868,7 @@ VIEWS.drills = function (m) {
 
 /* ---------- Write ---------- */
 VIEWS.write = function (m) {
-  var draft = ""; try { draft = localStorage.getItem("speakwell.draft") || ""; } catch (e) {}
+  var draft = S.draft || "", dT = null;
   m.innerHTML = top("Writing studio", { eyebrow: "Write" }) +
     '<div class="row"><button class="btn" data-go="words">Confused words</button><a class="btn" href="#guides">Writing guides</a></div>' +
     '<div class="section card stack"><div class="row" style="justify-content:space-between"><h2>Draft</h2><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div>" +
@@ -674,7 +880,7 @@ VIEWS.write = function (m) {
     '</div><div id="aiW" class="ai-out"></div></div>' +
     '<div class="section" id="guides"><h2>Writing guides</h2><div class="grid">' + SW.guides.map(function (g) { return '<button class="tile" data-go="guide~' + g.id + '"><span class="eyebrow">' + esc(g.kind) + '</span><span class="t">' + esc(g.title) + "</span></button>"; }).join("") + "</div></div>";
   var ed = $("#ed");
-  ed.oninput = function () { try { localStorage.setItem("speakwell.draft", ed.value); } catch (e) {} };
+  ed.oninput = function () { clearTimeout(dT); dT = setTimeout(function () { S.draft = ed.value; S.draftT = Date.now(); save(); }, 800); };
   $("#tpl").onchange = function () { var t = SW.templates.filter(function (x) { return x.id === this.value; }, this)[0]; if (t) { ed.value = t.text; ed.oninput(); } this.value = ""; };
   $("[data-say-ed]").onclick = function () { if (ed.value.trim()) say(ed.value); };
   $("#cpy").onclick = function () {
@@ -687,7 +893,8 @@ VIEWS.write = function (m) {
     $("#chkOut").innerHTML = '<div class="section card stack"><div class="meters"><div class="meter"><b>' + r.words + '</b><span>Words</span></div><div class="meter"><b>' + r.sentences + '</b><span>Sentences</span></div><div class="meter"><b>' + r.avg + '</b><span>Avg length</span></div><div class="meter"><b>' + r.flesch + '</b><span>Readability</span></div><div class="meter"><b>' + r.read + 'm</b><span>Read time</span></div></div>' +
       '<p class="small muted">Tone: ' + r.tone + ". Readability 60+ is easy for most readers; 30–50 is dense.</p>" +
       (r.issues.length ? r.issues.map(function (i) { return '<div class="issue"><span class="k">' + i[0] + "</span><span>" + esc(i[1]) + "</span></div>"; }).join("") : '<div class="issue"><span class="k">Clean</span><span>No issues found by the offline checker. For deeper feedback use AI rewrite.</span></div>') + "</div>";
-    S.writes++; addXP(10, "writing check");
+    logHistory("writing", "Writing check · " + r.issues.length + " issue" + (r.issues.length === 1 ? "" : "s"), t, r.issues.length ? r.issues.map(function (i) { return "• " + i[0] + ": " + i[1]; }).join("\n") : "No issues found.");
+    bump("writes"); addXP(10, "writing check");
   };
   var prompts = {
     fix: "Correct all grammar, spelling and punctuation errors. First give the corrected text. Then list each change as 'original → fixed (rule)'.",
@@ -704,6 +911,7 @@ VIEWS.write = function (m) {
       aiCall([{ role: "system", content: COACH_BASE.replace("{level}", S.settings.level) + " You are editing the learner's writing. " + prompts[b.getAttribute("data-op")] }, { role: "user", content: t }])
         .then(function (r) {
           out.innerHTML = mdLite(r) + '<div class="row" style="margin-top:8px"><button class="btn sm" id="useR">Replace my draft</button></div>';
+          logHistory("writing", "AI rewrite · " + b.textContent, t, r);
           $("#useR").onclick = function () { ed.value = r.split(/\n\s*\n(?=[^\n]*(→|changed|removed|word count))/i)[0].trim(); ed.oninput(); toast("Draft replaced"); };
           addXP(5);
         }).catch(function (e) { out.innerHTML = '<div class="notice">' + esc(e.message) + "</div>"; });
@@ -722,8 +930,8 @@ VIEWS.guide = function (m, id) {
     '<div class="why">' + esc(g.tip) + "</div>" +
     (tpl ? '<div class="row"><button class="btn primary" id="useTpl">Open the template in the studio</button></div>' : "") +
     '<div class="section card"><h3>Practise</h3><p class="muted small">Write a short piece using this guide, then get AI feedback.</p><textarea id="gt" rows="6"></textarea><div class="row" style="margin-top:8px"><button class="btn" id="gb">' + ico("spark") + 'Feedback</button><button class="btn ghost" id="gc">Offline check</button></div><div id="go" class="ai-out" style="margin-top:10px"></div></div></div>';
-  if (tpl) $("#useTpl").onclick = function () { try { localStorage.setItem("speakwell.draft", SW.templates.filter(function (t) { return t.id === tpl; })[0].text); } catch (e) {} go("write"); };
-  aiBox($("#gb"), $("#gt"), $("#go"), function (q) { return [{ role: "system", content: COACH_BASE.replace("{level}", S.settings.level) + " The learner practised: " + g.title + ". Steps: " + g.steps.join(" | ") + ". Assess how well they followed the steps, correct language errors, and give an improved version." }, { role: "user", content: q }]; });
+  if (tpl) $("#useTpl").onclick = function () { S.draft = SW.templates.filter(function (t) { return t.id === tpl; })[0].text; S.draftT = Date.now(); save(); go("write"); };
+  aiBox($("#gb"), $("#gt"), $("#go"), function (q) { return [{ role: "system", content: COACH_BASE.replace("{level}", S.settings.level) + " The learner practised: " + g.title + ". Steps: " + g.steps.join(" | ") + ". Assess how well they followed the steps, correct language errors, and give an improved version." }, { role: "user", content: q }]; }, ["writing", "Guide practice: " + g.title]);
   $("#gc").onclick = function () { var r = checkWriting($("#gt").value); $("#go").innerHTML = r.issues.length ? r.issues.map(function (i) { return '<div class="issue"><span class="k">' + i[0] + "</span><span>" + esc(i[1]) + "</span></div>"; }).join("") : '<p class="muted">No issues found offline.</p>'; };
 };
 
@@ -766,7 +974,8 @@ VIEWS.coach = function (m, sceneId) {
   }
   if (!hist.length) hist.push({ role: "assistant", content: opener() });
   hist.forEach(function (h) { bubble(h.role, h.content); });
-  function persist() { S.chats[key] = hist.slice(-40); save(); }
+  function persist() { S.chats[key] = hist.slice(-40); S.chatsT[key] = Date.now(); save(); }
+  function logTip(user, reply) { var m = reply.split(/\nTip:/)[1]; if (m) logHistory("coach", "Coach tip · " + (scene ? scene.title : (MODES.filter(function (x) { return x[0] === mode; })[0] || MODES[0])[1]), user, "Tip:" + m); }
   function send(text) {
     text = text.trim(); if (!text) return;
     hist.push({ role: "user", content: text }); bubble("user", text); inp.value = ""; persist();
@@ -777,20 +986,20 @@ VIEWS.coach = function (m, sceneId) {
       var fl = analyzeSpeech(text, 0).fillers;
       var tip = gi ? gi[1] : fl ? "Drop the filler words; a short pause sounds more confident." : "";
       var reply = lines[scriptIdx] + (tip ? "\nTip: " + tip : "");
-      hist.push({ role: "assistant", content: reply }); bubble("assistant", reply); persist(); addXP(2);
+      hist.push({ role: "assistant", content: reply }); bubble("assistant", reply); logTip(text, reply); persist(); addXP(2);
       if ($("#spk").checked) say(lines[scriptIdx]);
       return;
     }
     var wait = document.createElement("div"); wait.className = "msg sys"; wait.textContent = "…"; chat.appendChild(wait);
     aiCall([{ role: "system", content: sysPrompt() }].concat(hist.slice(-20))).then(function (r) {
-      wait.remove(); hist.push({ role: "assistant", content: r }); bubble("assistant", r); persist(); addXP(2);
+      wait.remove(); hist.push({ role: "assistant", content: r }); bubble("assistant", r); logTip(text, r); persist(); addXP(2);
       if ($("#spk").checked) say(r.split(/\nTip:/)[0]);
     }).catch(function (e) { wait.remove(); bubble("system", e.message); });
   }
   $("#cSend").onclick = function () { send(inp.value); };
   inp.onkeydown = function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(inp.value); } };
   $("#spk").onchange = function () { S.settings.speakReplies = this.checked; save(); };
-  $("#cReset").onclick = function () { delete S.chats[key]; save(); route(); };
+  $("#cReset").onclick = function () { S.chats[key] = []; S.chatsT[key] = Date.now(); save(); route(); };
   $$("[data-m]").forEach(function (b) { b.onclick = function () { S._mode = b.getAttribute("data-m"); save(); route(); }; });
   $("#cEval").onclick = function () {
     var mine = hist.filter(function (h) { return h.role === "user"; }).map(function (h) { return h.content; }).join("\n");
@@ -798,7 +1007,7 @@ VIEWS.coach = function (m, sceneId) {
     if (!aiReady()) { var r = analyzeSpeech(mine, 0); bubble("system", "Offline check: " + r.feedback.map(function (f) { return f[1]; }).join(" ")); return; }
     bubble("system", "Reviewing your messages…");
     aiCall([{ role: "system", content: COACH_BASE.replace("{level}", S.settings.level) + " Review all of the learner's messages from a conversation. Give: overall level estimate (CEFR), 3 strengths, the 5 most useful corrections (You said → Better), and 5 natural phrases they could use next time in this situation." }, { role: "user", content: mine }])
-      .then(function (r) { bubble("assistant", r); addXP(10, "conversation review"); }).catch(function (e) { bubble("system", e.message); });
+      .then(function (r) { bubble("assistant", r); logHistory("coach", "Conversation review", mine, r); addXP(10, "conversation review"); }).catch(function (e) { bubble("system", e.message); });
   };
   /* mic into composer */
   var L2 = null, on = false, micBtn = $("#cMic");
@@ -811,6 +1020,33 @@ VIEWS.coach = function (m, sceneId) {
   cleanup.push(function () { if (L2) L2.stop(); });
 };
 
+/* ---------- Correction history ---------- */
+var HKINDS = [["all", "All"], ["writing", "Writing"], ["speaking", "Speaking"], ["coach", "Coach"], ["grammar", "Grammar"], ["quiz", "Quiz"]];
+VIEWS.history = function (m) {
+  var st = { k: "all", q: "" };
+  m.innerHTML = top("Correction history", { back: "progress", eyebrow: S.history.length + " saved" + (M.on ? " · synced to Google Drive" : "") }) +
+    '<p class="muted">Every writing check, AI rewrite, speaking feedback, coach tip and quiz mistake is saved here, newest first. Review it before a meeting or once a week.</p>' +
+    '<div class="row" style="margin-top:12px" id="hk">' + HKINDS.map(function (k) { return '<button class="chip' + (k[0] === "all" ? " on" : "") + '" data-hk="' + k[0] + '">' + k[1] + "</button>"; }).join("") + "</div>" +
+    '<input id="hq" type="search" placeholder="Search your corrections" style="margin-top:10px">' +
+    '<div id="hl" class="stack" style="margin-top:14px"></div>' +
+    '<div class="row" style="margin-top:20px"><button class="btn ghost" id="hClr" style="color:var(--bad)">Clear history</button><span id="hClrC" hidden class="row"><span class="small">Delete all ' + S.history.length + ' entries' + (M.on ? " on every synced device" : "") + '?</span><button class="btn sm" id="hClrY" style="color:var(--bad)">Yes, clear</button><button class="btn sm" id="hClrN">Cancel</button></span></div>';
+  function draw() {
+    var list = S.history.slice().reverse().filter(function (h) {
+      return (st.k === "all" || h.kind === st.k) && (!st.q || (h.title + " " + h.input + " " + h.output).toLowerCase().indexOf(st.q) > -1);
+    }).slice(0, 200);
+    $("#hl").innerHTML = list.length ? list.map(function (h) {
+      return '<details class="card hitem"><summary><span class="pill ' + ({ writing: "ok", speaking: "warn", coach: "ok", grammar: "warn", quiz: "bad" }[h.kind] || "ok") + '">' + esc(h.kind) + '</span> <b>' + esc(h.title) + '</b><br><span class="muted small">' + new Date(h.t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + " · " + esc(h.input.slice(0, 90)) + (h.input.length > 90 ? "…" : "") + "</span></summary>" +
+        '<div class="stack" style="margin-top:10px"><div><span class="eyebrow">You wrote / said</span><p class="hbody">' + esc(h.input) + '</p></div><div><span class="eyebrow">Correction & feedback</span><div class="ai-out">' + mdLite(h.output) + "</div></div></div></details>";
+    }).join("") : '<div class="card"><p class="muted">' + (S.history.length ? "Nothing matches." : "No corrections yet. Run a writing check, analyse a speaking answer, or chat with the coach, and the feedback is saved here.") + "</p></div>";
+  }
+  draw();
+  $$("[data-hk]").forEach(function (b) { b.onclick = function () { st.k = b.getAttribute("data-hk"); $$("[data-hk]").forEach(function (x) { x.classList.toggle("on", x === b); }); draw(); }; });
+  $("#hq").oninput = function () { st.q = this.value.toLowerCase().trim(); draw(); };
+  $("#hClr").onclick = function () { $("#hClrC").hidden = false; };
+  $("#hClrN").onclick = function () { $("#hClrC").hidden = true; };
+  $("#hClrY").onclick = function () { S.history = []; S.historyClearedAt = Date.now(); save(); toast("History cleared"); route(); };
+};
+
 /* ---------- Progress ---------- */
 VIEWS.progress = function (m) {
   var ss = S.sessions.slice(-20);
@@ -818,6 +1054,7 @@ VIEWS.progress = function (m) {
   var fpm = ss.length ? (ss.reduce(function (a, b) { return a + (b.words ? b.fillers / b.words * 100 : 0); }, 0) / ss.length).toFixed(1) : "0";
   m.innerHTML = top("Progress", { eyebrow: "Your numbers" }) +
     '<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))"><div class="stat"><b>' + S.streak + '</b><span>Day streak</span></div><div class="stat"><b>' + S.xp + '</b><span>Total XP</span></div><div class="stat"><b>' + S.sessions.length + '</b><span>Speaking sessions</span></div><div class="stat"><b>' + (S.quiz.total ? Math.round(S.quiz.right / S.quiz.total * 100) : 0) + '%</b><span>Quiz accuracy</span></div><div class="stat"><b>' + S.writes + '</b><span>Writing checks</span></div></div>' +
+    '<div class="section"><button class="tile" data-go="history"><span class="t">Correction history</span><span class="d">' + S.history.length + ' saved corrections and pieces of feedback. Search and review them.</span></button></div>' +
     '<div class="section card"><div class="head"><h2>Speaking score</h2><span class="muted small">last ' + ss.length + " sessions · avg " + avg + " · fillers " + fpm + '/100 words</span></div>' +
     (ss.length ? '<div class="spark">' + ss.map(function (s) { return '<i style="height:' + Math.max(4, s.score) + '%" title="' + s.score + '"></i>'; }).join("") + "</div>" : '<p class="muted">No sessions yet. Try a scenario in Speak.</p>') + "</div>" +
     '<div class="section"><h2>Lessons by section</h2><div class="card stack">' + SW.lessonGroups.map(function (g) {
@@ -830,7 +1067,20 @@ VIEWS.progress = function (m) {
 VIEWS.settings = function (m) {
   var s = S.settings;
   m.innerHTML = top("Settings", { eyebrow: "App", noGear: true }) +
-    '<div class="stack"><div class="card stack"><h2>AI model</h2>' +
+    '<div class="stack"><div class="card stack"><h2>Google Drive sync</h2>' +
+    '<p class="muted small">Saves your progress, coach chats, writing draft and correction history to <b>My Drive › Speakwell › speakwell-data.json</b>, and keeps all your devices in step. The app can only see files it created, nothing else in your Drive.</p>' +
+    '<div id="syncState">' + syncStateHTML() + '</div>' +
+    '<label class="f" for="gHint">Google account<span class="hint">Optional. Pre-selects this account in the sign-in window.</span><input id="gHint" type="text" inputmode="email" autocapitalize="off" value="' + esc(M.hint) + '" placeholder="you@gmail.com"></label>' +
+    '<label class="row small" for="gKey"><input id="gKey" type="checkbox"' + (M.syncKey ? " checked" : "") + '> Also sync my OpenAI API key (stored in your Drive file)</label>' +
+    '<div class="row"><button class="btn primary" id="gConn">' + (M.on ? "Sync now" : "Connect Google Drive") + '</button>' + (M.on ? '<button class="btn ghost" id="gOff">Disconnect</button>' : "") + '</div>' +
+    '<details class="small"><summary class="muted">How to set up (one time)</summary><ol class="steps" style="margin-top:10px">' +
+    '<li><span>Open console.cloud.google.com and pick the project that owns the Client ID below (your “Notewire” project).</span></li>' +
+    '<li><span>APIs & Services › Library › search “Google Drive API” › Enable.</span></li>' +
+    '<li><span>APIs & Services › Credentials › your OAuth client › make sure <b>https://sumanpresi.github.io</b> is under Authorised JavaScript origins.</span></li>' +
+    '<li><span>OAuth consent screen › Audience: if the app is in Testing, add your Gmail address as a test user.</span></li>' +
+    '<li><span>Come back here and tap Connect Google Drive.</span></li></ol>' +
+    '<label class="f" for="gClient" style="margin-top:10px">OAuth Client ID<input id="gClient" type="text" autocapitalize="off" spellcheck="false" value="' + esc(M.clientId || DEFAULT_CLIENT) + '"></label></details></div>' +
+    '<div class="card stack"><h2>AI model</h2>' +
     '<p class="muted small">Your key is stored only on this device and sent directly to the AI provider. Never share a screenshot of this page.</p>' +
     '<label class="f" for="sKey">OpenAI API key<span class="hint">Create one at platform.openai.com → API keys. Starts with sk-</span><input id="sKey" type="password" autocomplete="off" value="' + esc(s.apiKey) + '" placeholder="sk-…"></label>' +
     '<label class="f" for="sModel">Model ID<span class="hint">Type the model ID exactly as your OpenAI account lists it (for example gpt-5.6-luna). Use "Test connection" to confirm it works.</span><input id="sModel" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" value="' + esc(s.model) + '"></label>' +
@@ -848,7 +1098,7 @@ VIEWS.settings = function (m) {
     '<div class="row"><button class="btn" data-say="Hello! This is how I sound. Let\'s practise your English together.">' + ico("play") + "Test voice</button></div></div>" +
     '<div class="card stack"><h2>Appearance</h2><div class="row">' + ["system", "light", "dark"].map(function (t) { return '<button class="chip' + (s.theme === t ? " on" : "") + '" data-th="' + t + '">' + t + "</button>"; }).join("") + "</div></div>" +
     '<div class="card stack"><h2>Your data</h2><p class="muted small">Progress is saved on this device. Back it up before changing phones or clearing browser data.</p><div class="row"><button class="btn" id="sExp">Export backup</button><label class="btn" for="sImp">Import backup<input id="sImp" type="file" accept="application/json" hidden></label></div>' +
-    '<hr class="sep"><div class="row"><button class="btn ghost" id="sReset" style="color:var(--bad)">Reset all progress</button><span id="sResetC" hidden class="row"><span class="small">This deletes XP, streaks and history.</span><button class="btn sm" id="sResetY" style="color:var(--bad)">Yes, reset</button><button class="btn sm" id="sResetN">Cancel</button></span></div></div>' +
+    '<hr class="sep"><div class="row"><button class="btn ghost" id="sReset" style="color:var(--bad)">Reset all progress</button><span id="sResetC" hidden class="row"><span class="small">This deletes XP, streaks and history' + (M.on ? ' on every synced device' : '') + '.</span><button class="btn sm" id="sResetY" style="color:var(--bad)">Yes, reset</button><button class="btn sm" id="sResetN">Cancel</button></span></div></div>' +
     '<p class="muted small">Speakwell works offline after the first visit. Speech-to-text uses your phone\'s recogniser, which usually needs a connection; when offline you can still record, replay and type.</p></div>';
   function collect() {
     s.apiKey = $("#sKey").value.trim(); s.model = $("#sModel").value.trim() || "gpt-5.6-luna"; s.baseUrl = $("#sBase").value.trim() || "https://api.openai.com/v1"; s.transcribeModel = $("#sTr").value.trim();
@@ -874,13 +1124,25 @@ VIEWS.settings = function (m) {
   $("#sImp").onchange = function () {
     var f = this.files[0]; if (!f) return;
     var r = new FileReader(); r.onload = function () {
-      try { var o = JSON.parse(r.result); var key = S.settings.apiKey; S = Object.assign(JSON.parse(JSON.stringify(defaults)), o); S.settings = Object.assign({}, defaults.settings, o.settings || {}); if (!S.settings.apiKey) S.settings.apiKey = key; save(); toast("Backup restored"); route(); }
+      try { var o = JSON.parse(r.result); var key = S.settings.apiKey; S = Object.assign(JSON.parse(JSON.stringify(defaults)), o); S.settings = Object.assign({}, defaults.settings, o.settings || {}); if (!S.settings.apiKey) S.settings.apiKey = key; recount(S); save(); toast("Backup restored"); route(); }
       catch (e) { toast("That file isn't a Speakwell backup."); }
     }; r.readAsText(f);
   };
+  function gCollect() { M.hint = $("#gHint").value.trim(); M.syncKey = $("#gKey").checked; var c = $("#gClient").value.trim(); M.clientId = c && c !== DEFAULT_CLIENT ? c : ""; saveMeta(); }
+  ["gHint", "gKey", "gClient"].forEach(function (id) { $("#" + id).addEventListener("change", gCollect); });
+  $("#gConn").onclick = function () {
+    gCollect(); var first = !M.on;
+    syncNow(true).then(function () { toast(first ? "Connected. Your progress is now saved to Google Drive." : "Synced with Google Drive"); route(); }).catch(function () {});
+  };
+  if ($("#gOff")) $("#gOff").onclick = function () {
+    var tok = Sync.token;
+    if (tok && window.google && google.accounts && google.accounts.oauth2) google.accounts.oauth2.revoke(tok, function () {});
+    M.on = false; M.fileId = ""; M.err = ""; saveMeta(); Sync.token = null; try { localStorage.removeItem("speakwell.gtoken"); } catch (e) {}
+    toast("Disconnected. Your Drive file is kept; reconnect anytime."); route();
+  };
   $("#sReset").onclick = function () { $("#sResetC").hidden = false; };
   $("#sResetN").onclick = function () { $("#sResetC").hidden = true; };
-  $("#sResetY").onclick = function () { var st = S.settings; S = JSON.parse(JSON.stringify(defaults)); S.settings = st; save(); toast("Progress reset"); go("home"); };
+  $("#sResetY").onclick = function () { var st = S.settings, nm = S.name; S = JSON.parse(JSON.stringify(defaults)); S.settings = st; S.name = nm; S.resetAt = Date.now(); recount(S); save(); toast("Progress reset" + (M.on ? " on all synced devices" : "")); go("home"); };
 };
 
 /* ================= boot ================= */
@@ -888,4 +1150,6 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
 }
 route();
+if (M.on && online() && tokenValid()) syncNow(false).then(afterSync).catch(function () {});
+window.addEventListener("online", function () { if (M.on && tokenValid() && Sync.dirty) syncNow(false).catch(function () {}); });
 })();

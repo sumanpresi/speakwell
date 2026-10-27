@@ -14,4 +14,4 @@ Open the app → Settings (gear) → paste your OpenAI API key → type the mode
 
 ## Updating later
 Upload the changed files to the same repo. If the app looks old, open it once while online and reload.
-In `sw.js`, raise the cache name (speakwell-v1 → v2) whenever you upload changes.
+In `sw.js`, raise the cache name (e.g. speakwell-v2 → v3) whenever you upload changes.
