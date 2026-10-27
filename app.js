@@ -396,7 +396,7 @@ function syncStateHTML() {
   if (!M.on) return '<p class="muted small">Not connected. Progress is saved on this device only.</p>';
   return '<p class="small"><b>Connected.</b> ' + (M.last ? "Last synced " + ago(M.last) + "." : "") + (M.hint ? " Account: " + esc(M.hint) + "." : "") + "</p>" + (M.err ? '<div class="notice">' + esc(M.err) + "</div>" : "");
 }
-var SAFE_VIEWS = ["notes", "home", "learn", "progress", "history", "speak", "settings", "write"];
+var SAFE_VIEWS = ["notes", "note", "home", "learn", "progress", "history", "speak", "settings", "write"];
 function afterSync() { var v = (location.hash || "#home").slice(1).split("~")[0]; if (SAFE_VIEWS.indexOf(v) > -1 && !document.activeElement.matches("textarea,input")) route(); }
 document.addEventListener("click", function (e) {
   if (!e.target.closest("[data-sync]")) return;
@@ -524,7 +524,7 @@ function route() {
   var h = (location.hash || "#home").slice(1);
   var parts = h.split("~"), v = parts[0], arg = parts[1];
   var m = $("#main");
-  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress", notes: "write" }[v] || "home";
+  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress", notes: "write", note: "write" }[v] || "home";
   shell(tab);
   var fn = VIEWS[v] || VIEWS.home;
   m.innerHTML = "";
@@ -896,28 +896,49 @@ VIEWS.write = function (m) {
   ed.oninput = function () { clearTimeout(dT); dT = setTimeout(function () { S.draft = ed.value; S.draftT = Date.now(); save(); }, 800); };
   /* remember the text as you wrote it, before any AI fix, so a note can show both versions */
   function track(before, fix) {
-    if (!S.wip || !S.wip.orig) S.wip = { orig: before, fixes: [], t: Date.now() };
-    S.wip.fixes.push(fix); S.wip.t = Date.now(); save();
+    if (!S.wip || !S.wip.fixes) S.wip = { orig: "", fixes: [], t: Date.now(), noteId: "" };
+    fix.r = true; S.wip.fixes.push(fix); S.wip.t = Date.now();
   }
-  $("#noteB").onclick = function () {
-    var cur = ed.value.trim(), btn = this;
+  function afterChange() { S.draft = ed.value; S.draftT = Date.now(); var n = syncDraftNote(ed.value, !!(S.wip && S.wip.noteId)); updateNoteBtn(n); }
+  function updateNoteBtn(n) { var nb = $("#noteB"); if (!nb) return; n = n || (S.wip && S.wip.noteId && S.notes.filter(function (x) { return x.id === S.wip.noteId; })[0]); nb.textContent = n ? "Open note" : "Save as note"; nb.setAttribute("data-open", n ? n.id : ""); }
+  /* Save as note: if fixes were already applied, the draft's note exists — open it.
+     Otherwise the AI corrects the whole draft, the draft becomes the corrected text, and
+     the note keeps your original next to the correction, sentence by sentence. */
+  function saveDraftNote(btn) {
+    var cur = ed.value.trim();
     if (!cur) { toast("Write something first."); return; }
-    var done = function () { S.wip = { orig: "", fixes: [], t: Date.now() }; save(); btn.textContent = "Saved ✓"; setTimeout(function () { btn.textContent = "Save as note"; }, 2000); };
-    if (S.wip && S.wip.orig && S.wip.orig.trim() !== cur) {
-      saveNote({ orig: S.wip.orig.trim(), fixed: cur, fixes: S.wip.fixes.filter(function (f) { return f.from || f.why; }), source: "Writing studio" }); done(); return;
-    }
+    var open = btn && btn.getAttribute("data-open");
+    if (open && S.notes.some(function (x) { return x.id === open; }) && !btn.hasAttribute("data-force")) { go("note~" + open); return; }
+    if (S.wip && S.wip.fixes && S.wip.fixes.length) { var n0 = syncDraftNote(ed.value, false); updateNoteBtn(n0); return; }
     if (aiReady()) {
-      btn.disabled = true; btn.textContent = "Correcting…";
+      if (btn) { btn.disabled = true; btn.textContent = "Correcting…"; }
       correctWithAI(cur).then(function (j) {
-        saveNote({ orig: cur, fixed: j.corrected.trim(), fixes: (j.fixes || []).map(function (f) { return { from: f.from, to: f.to, why: f.why, topic: f.topic || "" }; }), source: "Writing studio" }); done();
-      }).catch(function (e) { toast(e.message); btn.textContent = "Save as note"; }).then(function () { btn.disabled = false; });
+        var fixed = j.corrected.trim();
+        var details = (j.fixes || []).map(function (f) { return { from: f.from, to: f.to, why: f.why, topic: f.topic || "" }; });
+        S.wip = { orig: "", fixes: [], t: Date.now(), noteId: "" };
+        if (fixed !== cur) track(cur, { from: cur, to: fixed, why: "AI correction", topic: "", big: true });
+        details.forEach(function (d) { S.wip.fixes.push(d); });
+        if (fixed !== cur) { ed.value = fixed; }
+        var n = fixed !== cur ? syncDraftNote(fixed, false) : saveNote({ orig: cur, fixed: cur, fixes: [], source: "Writing studio" });
+        if (fixed === cur) { S.wip.noteId = n.id; toast("No mistakes found. Saved to My notes."); }
+        else toast("Draft corrected. Your original is kept in the note.");
+        afterChangeSilent(); updateNoteBtn(n);
+      }).catch(function (e) { toast(e.message); }).then(function () { if (btn) { btn.disabled = false; updateNoteBtn(); } });
       return;
     }
     var r = checkWriting(cur);
-    saveNote({ orig: cur, fixed: cur, pending: true, fixes: r.issues.map(function (i) { return { from: "", to: "", why: i[1], topic: i[0] }; }), source: "Writing studio (offline)" });
-    done(); toast("Saved. Open My notes when online and tap Correct with AI.");
-  };
-  $("#tpl").onchange = function () { S.wip = { orig: "", fixes: [], t: Date.now() }; var t = SW.templates.filter(function (x) { return x.id === this.value; }, this)[0]; if (t) { ed.value = t.text; ed.oninput(); } this.value = ""; };
+    var n2 = saveNote({ orig: cur, fixed: cur, pending: true, fixes: r.issues.map(function (i) { return { from: "", to: "", why: i[1], topic: i[0] }; }), source: "Writing studio (offline)" });
+    S.wip = { orig: "", fixes: [], t: Date.now(), noteId: n2.id }; save(); updateNoteBtn(n2);
+    toast("Saved. Open the note when online and tap Correct with AI.");
+  }
+  function afterChangeSilent() { S.draft = ed.value; S.draftT = Date.now(); save(); }
+  $("#noteB").onclick = function () { saveDraftNote(this); };
+  updateNoteBtn();
+  ed.addEventListener("input", function () {
+    if (!ed.value.trim() && S.wip && (S.wip.fixes.length || S.wip.noteId)) { S.wip = { orig: "", fixes: [], t: Date.now(), noteId: "" }; save(); updateNoteBtn(); }
+    else if (S.wip && S.wip.noteId) { clearTimeout(ed._nT); ed._nT = setTimeout(function () { syncDraftNote(ed.value, true); }, 1500); }
+  });
+  $("#tpl").onchange = function () { S.wip = { orig: "", fixes: [], t: Date.now(), noteId: "" }; updateNoteBtn(); var t = SW.templates.filter(function (x) { return x.id === this.value; }, this)[0]; if (t) { ed.value = t.text; ed.oninput(); } this.value = ""; };
   $("[data-say-ed]").onclick = function () { if (ed.value.trim()) say(ed.value); };
   $("#cpy").onclick = function () {
     var v = ed.value; if (!v) return;
@@ -948,19 +969,19 @@ VIEWS.write = function (m) {
         .then(function (r) {
           out.innerHTML = mdLite(r) + '<div class="row" style="margin-top:8px"><button class="btn sm" id="useR">Replace my draft</button></div>';
           logHistory("writing", "AI rewrite · " + b.textContent, t, r);
-          $("#useR").onclick = function () { track(ed.value, { from: "", to: "", why: "AI rewrite: " + b.textContent, topic: "" }); ed.value = r.split(/\n\s*\n(?=[^\n]*(→|changed|removed|word count))/i)[0].trim(); ed.oninput(); toast("Draft replaced"); };
+          $("#useR").onclick = function () { var before = ed.value, nv = r.split(/\n\s*\n(?=[^\n]*(→|changed|removed|word count))/i)[0].trim(); track(before, { from: before, to: nv, why: "AI rewrite: " + b.textContent, topic: "", big: true }); ed.value = nv; afterChange(); toast("Draft replaced. Your original is kept in the note."); };
           addXP(5);
         }).catch(function (e) { out.innerHTML = '<div class="notice">' + esc(e.message) + "</div>"; });
     };
   });
   /* sentence analysis: select text (or put the cursor in a sentence) */
   var helper = { S: function () { return S; }, ai: aiCall, aiReady: aiReady, toast: toast, log: logHistory, check: checkWriting,
-    replace: function (find, rep, within, why) {
+    replace: function (find, rep, within, why, topic) {
       var v = ed.value, base = within ? v.indexOf(within) : 0, i = base < 0 ? v.indexOf(find) : v.indexOf(find, base);
       if (i < 0) return false;
-      track(v, { from: find, to: rep, why: why || "", topic: "" });
-      ed.value = v.slice(0, i) + rep + v.slice(i + find.length); ed.oninput(); return true;
-    }, saveNote: saveNote };
+      track(v, { from: find, to: rep, why: why || "", topic: topic || "" });
+      ed.value = v.slice(0, i) + rep + v.slice(i + find.length); afterChange(); return true;
+    }, saveNote: function () { saveDraftNote(null); }, openNote: function () { if (S.wip && S.wip.noteId) go("note~" + S.wip.noteId); } };
   function selSentence() { return SW.sentenceAt(ed.value, ed.selectionStart, ed.selectionEnd); }
   function selChange() {
     var bar = $("#selbar"); if (!bar) return;
@@ -1080,95 +1101,189 @@ VIEWS.coach = function (m, sceneId) {
   cleanup.push(function () { if (L2) L2.stop(); });
 };
 
-/* ---------- Notes: your version vs corrected, for revision ---------- */
+/* ---------- Notes: one note per draft, sentence by sentence ---------- */
 function tokens(s) { return String(s || "").match(/[A-Za-z0-9'’]+|\s+|[^A-Za-z0-9'’\s]/g) || []; }
-function diffHTML(a, b) {
-  var A = tokens(a), B = tokens(b), n = A.length, m = B.length;
-  if (n * m > 2500000) return { a: esc(a), b: esc(b) };
-  var norm = function (t) { return /^\s+$/.test(t) ? " " : t; };
-  var L = []; for (var i = 0; i <= n; i++) { L.push(new Uint16Array(m + 1)); }
+function diffOps(a, b) {
+  var A = tokens(a), B = tokens(b), n = A.length, m = B.length, ops = [];
+  var norm = function (t) { return /^\s+$/.test(t) ? (t.indexOf("\n") > -1 ? "\n" : " ") : t; };
+  if (n * m > 4000000) { ops.push({ t: "del", v: a }); ops.push({ t: "ins", v: b }); return ops; }
+  var L = []; for (var i = 0; i <= n; i++) L.push(new Uint16Array(m + 1));
   for (i = n - 1; i >= 0; i--) for (var j = m - 1; j >= 0; j--) L[i][j] = norm(A[i]) === norm(B[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
-  var oa = "", ob = "", da = "", db = "";
-  var flushA = function () { if (da) { oa += da.trim() ? '<del class="nm-del">' + esc(da.trimEnd()) + "</del>" + (/\s$/.test(da) ? " " : "") : esc(da); da = ""; } };
-  var flushB = function () { if (db) { ob += db.trim() ? '<ins class="nm-ins">' + esc(db.trimEnd()) + "</ins>" + (/\s$/.test(db) ? " " : "") : esc(db); db = ""; } };
   i = 0; j = 0;
   while (i < n && j < m) {
-    if (norm(A[i]) === norm(B[j])) { flushA(); flushB(); oa += esc(A[i]); ob += esc(B[j]); i++; j++; }
-    else if (L[i + 1][j] >= L[i][j + 1]) { da += A[i++]; }
-    else { db += B[j++]; }
+    if (norm(A[i]) === norm(B[j])) { ops.push({ t: "eq", v: B[j] }); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) ops.push({ t: "del", v: A[i++] });
+    else ops.push({ t: "ins", v: B[j++] });
   }
-  while (i < n) da += A[i++]; while (j < m) db += B[j++];
-  flushA(); flushB();
-  return { a: oa.replace(/\n/g, "<br>"), b: ob.replace(/\n/g, "<br>") };
+  while (i < n) ops.push({ t: "del", v: A[i++] }); while (j < m) ops.push({ t: "ins", v: B[j++] });
+  return ops;
 }
-function saveNote(n) {
-  var t = Date.now();
-  var note = Object.assign({ id: "n" + t.toString(36) + Math.random().toString(36).slice(2, 5), t: t, u: t, title: "", orig: "", fixed: "", natural: "", fixes: [], source: "", revised: 0, lastRev: 0, pending: false }, n);
-  if (!note.title) note.title = note.orig.replace(/\s+/g, " ").slice(0, 60) + (note.orig.length > 60 ? "…" : "");
-  S.notes.push(note); if (S.notes.length > 500) S.notes = S.notes.slice(-500);
-  save(); toast("Saved to My notes");
+var ABBR = ["no", "nos", "mr", "mrs", "ms", "dr", "sh", "smt", "st", "vs", "etc", "e.g", "i.e", "approx", "dept", "govt", "ref", "fig", "sr", "jr"];
+/* Split an original/corrected pair into aligned sentences */
+function sentencePairs(orig, fixed) {
+  var ops = diffOps(orig, fixed), rows = [], r = null, da = "", db = "", lastWord = "";
+  function start() { r = { a: "", b: "", aH: "", bH: "", changed: false }; }
+  function flush() {
+    if (da) { if (da.trim()) { r.aH += '<del class="nm-del">' + esc(da.trim()) + "</del>" + (/\s$/.test(da) ? " " : ""); r.changed = true; } else r.aH += esc(da); r.a += da; da = ""; }
+    if (db) { if (db.trim()) { r.bH += '<ins class="nm-ins">' + esc(db.trim()) + "</ins>" + (/\s$/.test(db) ? " " : ""); r.changed = true; } else r.bH += esc(db); r.b += db; db = ""; }
+  }
+  function close() { flush(); if (r.a.trim() || r.b.trim()) rows.push(r); start(); }
+  start();
+  for (var k = 0; k < ops.length; k++) {
+    var o = ops[k];
+    if (o.t === "del") { da += o.v; continue; }
+    if (o.t === "ins") { db += o.v; continue; }
+    flush();
+    if (/^\s+$/.test(o.v)) {
+      if (o.v.indexOf("\n") > -1) { close(); continue; }
+      var prev = r.b.replace(/\s+$/, "");
+      if (/[.!?]["')]?$/.test(prev) && ABBR.indexOf(lastWord.toLowerCase()) < 0 && !/^[A-Z]$/.test(lastWord)) { close(); continue; }
+    }
+    r.a += o.v; r.b += o.v; r.aH += esc(o.v); r.bH += esc(o.v);
+    if (/^[A-Za-z0-9'’]+$/.test(o.v)) lastWord = o.v;
+  }
+  close();
+  return rows.map(function (x) { x.a = x.a.trim(); x.b = x.b.trim(); return x; });
+}
+function noteTags(n) {
+  var t = {};
+  (n.fixes || []).forEach(function (f) { if (f.topic && !f.big) t[f.topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")] = 1; });
+  if (/^(dear|sir|madam|hi|hello|respected)\b|subject\s*:/im.test(n.fixed || "")) t.email = 1;
+  return Object.keys(t).filter(Boolean).slice(0, 4);
+}
+function noteTitle(text) {
+  var subj = String(text).match(/subject\s*:\s*(.+)/i);
+  var parts = String(text).split(/(?<=[.!?])\s+|\n+/).map(function (x) { return x.trim(); }).filter(Boolean);
+  var skip = /^(good (morning|afternoon|evening)|hi\b|hello|dear|respected|sir|madam|greetings|thank(s| you)|regards|best|warm)/i;
+  var first = subj ? subj[1] : (parts.filter(function (x) { return !skip.test(x) && x.split(/\s+/).length > 2; })[0] || parts[0]);
+  first = (first || text).trim();
+  return first.length > 60 ? first.slice(0, 58).trim() + "…" : first;
+}
+/* create or update a note */
+function saveNote(n, quiet) {
+  if (!n.id) delete n.id;
+  var t = Date.now(), note = n.id && S.notes.filter(function (x) { return x.id === n.id; })[0];
+  if (note) { Object.assign(note, n, { u: t }); if (!note.titleSet) note.title = noteTitle(note.fixed || note.orig); }
+  else {
+    note = Object.assign({ id: "n" + t.toString(36) + Math.random().toString(36).slice(2, 5), t: t, u: t, title: "", titleSet: false, orig: "", fixed: "", fixes: [], source: "", revised: 0, lastRev: 0, pending: false }, n);
+    if (!note.title) note.title = noteTitle(note.fixed || note.orig);
+    S.notes.push(note); if (S.notes.length > 500) S.notes = S.notes.slice(-500);
+    if (!quiet) toast("Saved to My notes");
+  }
+  save();
+  return note;
+}
+/* The writer's own version = current draft with every AI change undone */
+function revertFixes(text, fixes) {
+  var ok = true;
+  for (var i = fixes.length - 1; i >= 0; i--) {
+    var f = fixes[i]; if (!f.r) continue;
+    var at = f.to ? text.indexOf(f.to) : -1;
+    if (at < 0) { ok = false; continue; }
+    text = text.slice(0, at) + f.from + text.slice(at + f.to.length);
+  }
+  return { text: text, ok: ok };
+}
+/* Keep the draft's note in step with the draft */
+function syncDraftNote(cur, quiet) {
+  var w = S.wip; if (!w || !w.fixes || !w.fixes.length) return null;
+  var existing = w.noteId && S.notes.filter(function (x) { return x.id === w.noteId; })[0];
+  var rv = revertFixes(cur, w.fixes);
+  var orig = rv.ok || !existing ? rv.text : existing.orig;
+  var note = saveNote({ id: existing ? existing.id : null, orig: orig.trim(), fixed: cur.trim(), fixes: w.fixes.slice(), source: "Writing studio", pending: false }, quiet);
+  w.noteId = note.id; save();
   return note;
 }
 function correctWithAI(text) {
-  return aiCall([{ role: "system", content: COACH_BASE.replace("{level}", S.settings.level) + ' Correct the learner\'s English. Fix grammar, spelling, punctuation and unnatural wording; keep their meaning, tone and layout (line breaks). Reply with ONLY JSON: {"corrected": string, "fixes": [{"from": string (exact text from the original), "to": string, "why": string (one short line), "topic": string (e.g. Articles, Verb Tenses, Prepositions)}]}. If nothing needs fixing, return the text unchanged and an empty fixes list.' }, { role: "user", content: text }], { json: true })
+  return aiCall([{ role: "system", content: COACH_BASE.replace("{level}", S.settings.level) + ' Correct the learner\'s English. Fix grammar, spelling, punctuation and unnatural wording; keep their meaning, tone and layout (keep every line break). Reply with ONLY JSON: {"corrected": string, "fixes": [{"from": string (exact text from the original), "to": string, "why": string (one short line), "topic": string (e.g. Articles, Verb Tenses, Prepositions)}]}. If nothing needs fixing, return the text unchanged and an empty fixes list.' }, { role: "user", content: text }], { json: true })
     .then(function (r) { var j = null; try { j = JSON.parse(r); } catch (e) { var mm = r.match(/\{[\s\S]*\}/); if (mm) try { j = JSON.parse(mm[0]); } catch (e2) {} } if (!j || typeof j.corrected !== "string") throw new Error("Couldn't read the correction. Try again."); return j; });
 }
-VIEWS.notes = function (m) {
-  var st = { q: "", hide: false, only: "all" };
-  function draw() {
-    var all = S.notes.slice().reverse();
-    var list = all.filter(function (n) {
-      if (st.only === "due" && n.lastRev && Date.now() - n.lastRev < 3 * 864e5) return false;
-      return !st.q || (n.title + " " + n.orig + " " + n.fixed + " " + n.fixes.map(function (f) { return f.why + " " + (f.topic || ""); }).join(" ")).toLowerCase().indexOf(st.q) > -1;
+function relDate(t) {
+  var d = new Date(t), now = new Date(), dd = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 864e5);
+  if (dd === 0) return "Today"; if (dd === 1) return "Yesterday"; if (dd < 7) return d.toLocaleDateString([], { weekday: "long" });
+  return d.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+function wordCount(s) { return (String(s).match(/\S+/g) || []).length; }
+
+var NS = { q: "", only: "all", hide: false, changedOnly: true };
+VIEWS.notes = function (m, id) {
+  var wide = window.matchMedia("(min-width: 900px)").matches;
+  var all = S.notes.slice().sort(function (a, b) { return b.u - a.u; });
+  var cur = id && S.notes.filter(function (x) { return x.id === id; })[0];
+  if (!cur && id) { go("notes"); return; }
+  if (!cur && wide && all.length) cur = all[0];
+  function list() {
+    var items = all.filter(function (n) {
+      if (NS.only === "due" && n.lastRev && Date.now() - n.lastRev < 3 * 864e5) return false;
+      return !NS.q || (n.title + " " + n.orig + " " + n.fixed + " " + noteTags(n).join(" ")).toLowerCase().indexOf(NS.q) > -1;
     });
-    m.innerHTML = top("My notes", { back: "write", eyebrow: S.notes.length + " saved" + (M.on ? " · synced to Google Drive" : "") }) +
-      '<p class="muted">Your own sentences next to the corrected versions. Mistakes are struck through in red, corrections highlighted in green.</p>' +
-      '<div class="row" style="margin-top:12px"><input id="nq" type="search" placeholder="Search notes, e.g. article, tense" style="flex:1;min-width:180px" value="' + esc(st.q) + '">' +
-      '<button class="chip' + (st.only === "due" ? " on" : "") + '" id="nDue">Due for revision</button><button class="chip' + (st.hide ? " on" : "") + '" id="nHide">Revision mode</button></div>' +
-      (st.hide ? '<div class="notice info" style="margin-top:12px">Corrections are hidden. Read your version, say the correct sentence aloud, then tap <b>Reveal</b>.</div>' : "") +
-      '<div class="stack" style="margin-top:14px">' + (list.length ? list.map(card).join("") : '<div class="card"><p class="muted">' + (S.notes.length ? "No notes match." : "No notes yet. In the Writing studio, tap <b>Save as note</b> after fixing your text, or save from a Sentence analysis.") + "</p></div>") + "</div>";
-    bind();
+    return '<div class="nl"><div class="nl-head"><h2>All notes <span class="muted small">' + all.length + '</span></h2><button class="icon-btn" data-go="write" aria-label="New draft" title="New draft">+</button></div>' +
+      '<input id="nq" type="search" placeholder="Search all notes" value="' + esc(NS.q) + '">' +
+      '<div class="row tight"><button class="chip' + (NS.only === "all" ? " on" : "") + '" data-nf="all">All</button><button class="chip' + (NS.only === "due" ? " on" : "") + '" data-nf="due">Due for revision</button></div>' +
+      '<div class="nl-items">' + (items.length ? items.map(function (n) {
+        var pairs = sentencePairs(n.orig, n.fixed), ch = pairs.filter(function (p) { return p.changed; }).length;
+        return '<button class="nl-item' + (cur && cur.id === n.id ? " on" : "") + '" data-go="note~' + n.id + '"><b>' + esc(n.title) + '</b><span class="nl-prev">' + esc(n.fixed.replace(/\s+/g, " ").slice(0, 90)) + '</span><span class="nl-meta">' + relDate(n.u) + " · " + (n.pending ? "not corrected yet" : ch + " of " + pairs.length + " sentences fixed") + " · " + wordCount(n.fixed) + " words</span>" +
+          (noteTags(n).length ? '<span class="nl-tags">' + noteTags(n).map(function (t) { return "<i>#" + esc(t) + "</i>"; }).join("") + "</span>" : "") + "</button>";
+      }).join("") : '<p class="muted small" style="padding:12px">' + (all.length ? "No notes match." : "No notes yet. In the Writing studio, fix a sentence or tap Save as note.") + "</p>") + "</div></div>";
   }
-  function card(n) {
-    var d = diffHTML(n.orig, n.fixed), same = n.orig.trim() === n.fixed.trim();
-    return '<article class="card note" data-id="' + n.id + '"><div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="min-width:0"><h3>' + esc(n.title) + '</h3><p class="muted small">' + new Date(n.t).toLocaleDateString([], { dateStyle: "medium" }) + (n.source ? " · " + esc(n.source) : "") + (n.revised ? " · revised " + n.revised + "×" : "") + "</p></div>" +
-      (n.fixes.length ? '<span class="pill warn">' + n.fixes.length + " fix" + (n.fixes.length > 1 ? "es" : "") + "</span>" : "") + "</div>" +
-      '<div class="nm-grid"><div class="nm-box nm-wrong"><span class="eyebrow">Your version</span><p>' + d.a + "</p></div>" +
-      '<div class="nm-box nm-right"' + (st.hide ? " hidden" : "") + '><span class="eyebrow">' + (n.pending ? "Not corrected yet" : same ? "Correct as written" : "Corrected") + "</span><p>" + d.b + "</p>" +
-      (n.natural ? '<p class="small" style="margin-top:6px"><span class="muted">More natural:</span> ' + esc(n.natural) + "</p>" : "") + "</div></div>" +
-      (n.fixes.length ? '<ul class="nm-fixes"' + (st.hide ? " hidden" : "") + ">" + n.fixes.map(function (f) { return "<li>" + (f.from ? '<del class="nm-del">' + esc(f.from) + "</del> → " : "") + (f.to ? '<ins class="nm-ins">' + esc(f.to) + "</ins> " : "") + '<span class="muted">' + esc(f.why || "") + (f.topic ? " · " + esc(f.topic) : "") + "</span></li>"; }).join("") + "</ul>" : "") +
-      '<div class="row"><button class="btn sm" data-n="reveal"' + (st.hide ? "" : " hidden") + ">Reveal</button>" +
-      (n.pending ? '<button class="btn sm primary" data-n="ai">Correct with AI</button>' : "") +
-      '<button class="btn sm" data-n="say">' + ico("play") + 'Hear correct</button><button class="btn sm" data-n="rev">' + ico("ok") + "Revised</button>" +
-      '<button class="btn sm ghost" data-n="edit">Open in studio</button><button class="btn sm ghost" data-n="del" style="color:var(--bad)">Delete</button>' +
-      '<span class="row" data-n-conf hidden><span class="small">Delete this note?</span><button class="btn sm" data-n="delY" style="color:var(--bad)">Yes</button><button class="btn sm" data-n="delN">No</button></span></div></article>';
+  function detail(n) {
+    var pairs = sentencePairs(n.orig, n.fixed), ch = pairs.filter(function (p) { return p.changed; });
+    var shown = NS.changedOnly && ch.length ? ch : pairs, used = {};
+    var fx = (n.fixes || []).filter(function (f) { return !f.big && (f.why || f.from); });
+    var rows = shown.map(function (p) {
+      var mine = fx.filter(function (f, i) { if (used[i]) return false; var hit = (f.to && p.b.indexOf(f.to) > -1) || (f.from && p.a.indexOf(f.from) > -1); if (hit) used[i] = 1; return hit; });
+      var num = pairs.indexOf(p) + 1;
+      if (!p.changed) return '<div class="np-row same"><span class="np-n">' + num + '</span><div class="np-same">' + p.bH + ' <span class="pill ok">✓ correct</span></div></div>';
+      return '<div class="np-row"><span class="np-n">' + num + '</span><div class="np-pair"><div class="nm-box nm-wrong"><span class="eyebrow">Your version</span><p>' + p.aH + '</p></div>' +
+        '<div class="nm-box nm-right"' + (NS.hide ? " hidden" : "") + '><span class="eyebrow">Correct</span><p>' + p.bH + "</p></div>" +
+        (NS.hide ? '<button class="btn sm np-reveal" data-reveal>Reveal</button>' : "") + "</div>" +
+        (mine.length ? '<ul class="nm-fixes"' + (NS.hide ? " hidden" : "") + ">" + mine.map(function (f) { return "<li>" + (f.from && f.to ? '<del class="nm-del">' + esc(f.from) + '</del> → <ins class="nm-ins">' + esc(f.to) + "</ins> " : "") + '<span class="muted">' + esc(f.why || "") + (f.topic ? " · " + esc(f.topic) : "") + "</span></li>"; }).join("") + "</ul>" : "") + "</div>";
+    }).join("");
+    var rest = fx.filter(function (f, i) { return !used[i]; });
+    return '<div class="nd">' + (wide ? "" : '<button class="btn sm ghost" data-go="notes">' + ico("back") + "All notes</button>") +
+      '<input class="nd-title" id="ndTitle" value="' + esc(n.title) + '" aria-label="Note title">' +
+      '<p class="muted small">' + new Date(n.t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + " · " + esc(n.source || "") + " · " + wordCount(n.fixed) + " words" + (n.revised ? " · revised " + n.revised + "×" : "") + "</p>" +
+      (noteTags(n).length ? '<div class="nl-tags">' + noteTags(n).map(function (t) { return "<i>#" + esc(t) + "</i>"; }).join("") + "</div>" : "") +
+      '<div class="nd-stats"><div><b>' + ch.length + "</b><span>sentences fixed</span></div><div><b>" + (pairs.length - ch.length) + "</b><span>already correct</span></div><div><b>" + fx.length + "</b><span>corrections</span></div></div>" +
+      '<div class="row tight"><button class="btn sm" data-a="say">' + ico("play") + 'Hear correct</button><button class="btn sm" data-a="rev">' + ico("ok") + 'Revised</button><button class="btn sm" data-a="edit">Open in studio</button>' +
+      (n.pending ? '<button class="btn sm primary" data-a="ai">Correct with AI</button>' : "") + '<button class="btn sm ghost" data-a="del" style="color:var(--bad)">Delete</button>' +
+      '<span class="row tight" id="ndConf" hidden><span class="small">Delete this note?</span><button class="btn sm" data-a="delY" style="color:var(--bad)">Yes</button><button class="btn sm" data-a="delN">No</button></span></div>' +
+      '<div class="row tight"><button class="chip' + (NS.changedOnly ? " on" : "") + '" data-a="changed">Fixed sentences only</button><button class="chip' + (NS.hide ? " on" : "") + '" data-a="hide">Revision mode</button></div>' +
+      (NS.hide ? '<div class="notice info">Corrections are hidden. Read your version, say the correct sentence aloud, then tap Reveal.</div>' : "") +
+      '<div class="np">' + (rows || '<p class="muted">Nothing to show.</p>') + "</div>" +
+      (rest.length && !NS.hide ? '<div class="section"><h3 class="eyebrow">Other notes on this draft</h3><ul class="nm-fixes">' + rest.map(function (f) { return '<li><span class="muted">' + esc(f.why || "") + (f.topic ? " · " + esc(f.topic) : "") + "</span></li>"; }).join("") + "</ul></div>" : "") +
+      '<details class="section"><summary class="muted">Full text</summary><div class="nm-grid" style="margin-top:10px"><div class="nm-box nm-wrong"><span class="eyebrow">Your version</span><p class="hbody">' + esc(n.orig) + '</p></div><div class="nm-box nm-right"><span class="eyebrow">Correct</span><p class="hbody">' + esc(n.fixed) + "</p></div></div></details></div>";
   }
-  function bind() {
-    $("#nq").oninput = function () { var pos = this.selectionStart; st.q = this.value.toLowerCase(); draw(); var q = $("#nq"); q.focus(); q.setSelectionRange(pos, pos); };
-    $("#nHide").onclick = function () { st.hide = !st.hide; draw(); };
-    $("#nDue").onclick = function () { st.only = st.only === "due" ? "all" : "due"; draw(); };
-    $$(".note").forEach(function (el) {
-      var n = S.notes.filter(function (x) { return x.id === el.getAttribute("data-id"); })[0];
-      el.onclick = function (e) {
-        var b = e.target.closest("[data-n]"); if (!b) return;
-        var a = b.getAttribute("data-n");
-        if (a === "reveal") { $$(".nm-right,.nm-fixes", el).forEach(function (x) { x.hidden = false; }); b.hidden = true; }
-        if (a === "say") say(n.fixed);
-        if (a === "rev") { n.revised = (n.revised || 0) + 1; n.lastRev = Date.now(); n.u = Date.now(); addXP(3, "note revised"); draw(); }
-        if (a === "edit") { S.draft = n.fixed; S.draftT = Date.now(); S.wip = { orig: "", fixes: [], t: Date.now() }; save(); go("write"); }
-        if (a === "del") $("[data-n-conf]", el).hidden = false;
-        if (a === "delN") $("[data-n-conf]", el).hidden = true;
-        if (a === "delY") { S.notes = S.notes.filter(function (x) { return x.id !== n.id; }); S.notesDel[n.id] = Date.now(); save(); toast("Note deleted"); draw(); }
-        if (a === "ai") {
-          b.disabled = true; b.textContent = "Correcting…";
-          correctWithAI(n.orig).then(function (j) { n.fixed = j.corrected; n.fixes = (j.fixes || []).map(function (f) { return { from: f.from, to: f.to, why: f.why, topic: f.topic || "" }; }); n.pending = false; n.u = Date.now(); save(); draw(); })
-            .catch(function (e2) { toast(e2.message); b.disabled = false; b.textContent = "Correct with AI"; });
-        }
-      };
-    });
-  }
-  draw();
+  var head = top("My notes", { back: wide || !cur ? "write" : "notes", eyebrow: S.notes.length + " saved" + (M.on ? " · synced to Google Drive" : "") });
+  if (wide) m.innerHTML = head + '<div class="nwrap">' + list() + (cur ? detail(cur) : '<div class="nd"><p class="muted">Select a note.</p></div>') + "</div>";
+  else m.innerHTML = head + (cur ? detail(cur) : list());
+  m.classList.add("wide-main"); cleanup.push(function () { m.classList.remove("wide-main"); });
+  var q = $("#nq");
+  if (q) q.oninput = function () { var p = this.selectionStart; NS.q = this.value.toLowerCase(); VIEWS.notes(m, cur && wide ? cur.id : null); var q2 = $("#nq"); q2.focus(); q2.setSelectionRange(p, p); };
+  $$("[data-nf]").forEach(function (b) { b.onclick = function () { NS.only = b.getAttribute("data-nf"); route(); }; });
+  if (!cur) return;
+  $("#ndTitle").onchange = function () { cur.title = this.value.trim() || noteTitle(cur.fixed); cur.titleSet = true; cur.u = Date.now(); save(); route(); };
+  $(".nd").onclick = function (e) {
+    var rv = e.target.closest("[data-reveal]");
+    if (rv) { var row = rv.closest(".np-row"); $$(".nm-right,.nm-fixes", row).forEach(function (x) { x.hidden = false; }); rv.remove(); return; }
+    var b = e.target.closest("[data-a]"); if (!b) return;
+    var a = b.getAttribute("data-a");
+    if (a === "say") say(cur.fixed);
+    if (a === "rev") { cur.revised = (cur.revised || 0) + 1; cur.lastRev = Date.now(); cur.u = Date.now(); addXP(3, "note revised"); route(); }
+    if (a === "edit") { S.draft = cur.fixed; S.draftT = Date.now(); S.wip = { orig: cur.orig, fixes: (cur.fixes || []).slice(), t: Date.now(), noteId: cur.id }; save(); go("write"); }
+    if (a === "changed") { NS.changedOnly = !NS.changedOnly; route(); }
+    if (a === "hide") { NS.hide = !NS.hide; route(); }
+    if (a === "del") $("#ndConf").hidden = false;
+    if (a === "delN") $("#ndConf").hidden = true;
+    if (a === "delY") { S.notes = S.notes.filter(function (x) { return x.id !== cur.id; }); S.notesDel[cur.id] = Date.now(); if (S.wip && S.wip.noteId === cur.id) S.wip.noteId = ""; save(); toast("Note deleted"); go("notes"); }
+    if (a === "ai") {
+      b.disabled = true; b.textContent = "Correcting…";
+      correctWithAI(cur.orig).then(function (j) { cur.fixed = j.corrected.trim(); cur.fixes = (j.fixes || []).map(function (f) { return { from: f.from, to: f.to, why: f.why, topic: f.topic || "" }; }); cur.pending = false; cur.u = Date.now(); if (!cur.titleSet) cur.title = noteTitle(cur.fixed); save(); route(); })
+        .catch(function (e2) { toast(e2.message); b.disabled = false; b.textContent = "Correct with AI"; });
+    }
+  };
 };
+VIEWS.note = VIEWS.notes;
 
 /* ---------- Correction history ---------- */
 var HKINDS = [["all", "All"], ["writing", "Writing"], ["speaking", "Speaking"], ["coach", "Coach"], ["grammar", "Grammar"], ["quiz", "Quiz"]];

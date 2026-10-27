@@ -150,7 +150,7 @@ SW.openAnalysis = function (sentence, h, mount) {
         return '<div class="an-fix"><div><span class="bad">' + esc(i.find) + '</span> → <b class="good">' + esc(i.replace) + '</b><p class="muted small">' + esc(i.why) + (i.topic ? " · " + esc(i.topic) : "") + '</p></div><button class="btn sm" data-fix="' + n + '">Apply</button></div>';
       }).join("") + "</div>" : "") +
       (d.better && key(d.better) !== key(sentence) ? '<div class="an-sec"><h3 class="eyebrow">More natural</h3><div class="an-better"><p>' + esc(d.better) + '</p><div class="row"><button class="btn sm" data-say="' + esc(d.better) + '">Hear it</button><button class="btn sm" id="anUse">Use this sentence</button></div></div></div>' : "") +
-      (issues.length || (d.better && key(d.better) !== key(sentence)) ? '<div class="row"><button class="btn" id="anNote">Save as note</button><span class="muted small">Keeps your version and the correction, with mistakes highlighted.</span></div>' : "") +
+      (issues.length || (d.better && key(d.better) !== key(sentence)) ? '<div class="row"><button class="btn" id="anNote">Open this draft\'s note</button><span class="muted small">Every fix you apply is saved to one note for this draft, with your version and the correction side by side.</span></div>' : "") +
       '<div class="an-sec"><h3 class="eyebrow">Whole sentence</h3><div class="row tight">' +
       [d.type, d.voice && d.voice !== "active" ? d.voice + " voice" : null, d.tense, ALL_TOPICS.filter(function (t) { return T[t] && (T[t].s === "present" || T[t].s === "attention"); }).length + " topics in this sentence", r.saved ? "saved analysis" : null, d.grammatical === false ? "has errors" : null]
         .filter(Boolean).map(function (x) { return '<span class="an-tag' + (x === "has errors" ? " bad" : "") + '">' + esc(x) + "</span>"; }).join("") +
@@ -173,18 +173,11 @@ SW.openAnalysis = function (sentence, h, mount) {
     });
     body.onclick = function (e) {
       var f = e.target.closest("[data-fix]"), l = e.target.closest("[data-lesson]");
-      if (f) { var i = issues[+f.getAttribute("data-fix")]; if (h.replace(i.find, i.replace, sentence, i.why)) { f.textContent = "Applied ✓"; f.disabled = true; sentence = sentence.split(i.find).join(i.replace); } else h.toast("Couldn't find that text in your draft. It may have changed."); }
+      if (f) { var i = issues[+f.getAttribute("data-fix")]; if (h.replace(i.find, i.replace, sentence, i.why, i.topic)) { f.textContent = "Applied ✓"; f.disabled = true; sentence = sentence.split(i.find).join(i.replace); } else h.toast("Couldn't find that text in your draft. It may have changed."); }
       if (l) { SW.closeAnalysis(); location.hash = "lesson~" + l.getAttribute("data-lesson"); }
     };
     var nb = document.getElementById("anNote");
-    if (nb) nb.onclick = function () {
-      var fixed = original;
-      issues.forEach(function (i) { if (fixed.indexOf(i.find) > -1) fixed = fixed.split(i.find).join(i.replace); });
-      if (!issues.length && d.better) fixed = d.better;
-      h.saveNote({ title: original.length > 60 ? original.slice(0, 60) + "…" : original, orig: original, fixed: fixed, natural: d.better && key(d.better) !== key(fixed) ? d.better : "",
-        fixes: issues.map(function (i) { return { from: i.find, to: i.replace, why: i.why, topic: i.topic || "" }; }), source: "Sentence analysis" });
-      nb.textContent = "Saved to notes ✓"; nb.disabled = true;
-    };
+    if (nb) nb.onclick = function () { h.saveNote(); };
     var use = document.getElementById("anUse");
     if (use) use.onclick = function () { if (h.replace(sentence, d.better, null, "More natural wording")) { use.textContent = "Replaced ✓"; use.disabled = true; sentence = d.better; } else h.toast("Couldn't find the original sentence in your draft."); };
   }
