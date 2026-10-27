@@ -30,7 +30,7 @@ var KEY = "speakwell.v1";
    - active days are a set, streak is computed from it
    - lessons, sessions, history and chats carry timestamps and are unioned */
 var defaults = {
-  name: "", done: {}, days: {}, counts: {}, sessions: [], history: [], chats: {}, chatsT: {}, draft: "", draftT: 0,
+  name: "", done: {}, days: {}, counts: {}, sessions: [], history: [], chats: {}, chatsT: {}, draft: "", draftT: 0, analyses: {},
   resetAt: 0, historyClearedAt: 0, updatedAt: 0,
   xp: 0, streak: 0, writes: 0, quiz: { right: 0, total: 0 },
   settings: { apiKey: "", baseUrl: "https://api.openai.com/v1", model: "gpt-5.6-luna", transcribeModel: "gpt-4o-mini-transcribe",
@@ -194,7 +194,8 @@ AudioRec.prototype.stop = function () {
 };
 
 /* ================= AI ================= */
-function aiCall(messages) {
+function aiCall(messages, opts) {
+  opts = opts || {};
   var s = S.settings;
   if (!s.apiKey) return Promise.reject(new Error("Add your OpenAI API key in Settings to use AI features."));
   if (!online()) return Promise.reject(new Error("You're offline. AI feedback needs a connection; the offline checks above still work."));
@@ -202,7 +203,7 @@ function aiCall(messages) {
   return fetch(base + "/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": "Bearer " + s.apiKey },
-    body: JSON.stringify({ model: s.model, messages: messages })
+    body: JSON.stringify(Object.assign({ model: s.model, messages: messages }, opts.json && !opts.plain ? { response_format: { type: "json_object" } } : {}))
   }).then(function (r) {
     return r.text().then(function (t) {
       var j = null; try { j = JSON.parse(t); } catch (e) {}
@@ -211,6 +212,7 @@ function aiCall(messages) {
         if (r.status === 401) m = "The API key was rejected. Check it in Settings.";
         if (r.status === 404 || /model/i.test(m) && /not exist|not found|does not have access/i.test(m)) m = "Model '" + s.model + "' wasn't found for this key. Check the model ID in Settings (" + m + ")";
         if (r.status === 429) m = "Rate limit or billing limit reached on your OpenAI account. " + m;
+        if (opts.json && !opts.plain && /response_format|json_object/i.test(m)) { var e0 = new Error(m); e0.retryPlain = true; throw e0; }
         throw new Error(m);
       }
       var c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
@@ -218,7 +220,7 @@ function aiCall(messages) {
       if (!c) throw new Error("The model returned an empty reply.");
       return c;
     });
-  });
+  }).catch(function (e) { if (e.retryPlain) return aiCall(messages, Object.assign({}, opts, { plain: true })); throw e; });
 }
 function transcribe(blob) {
   var s = S.settings;
@@ -325,6 +327,8 @@ function merge(a, b) {
     if (t > R || (!ta && !tb)) { out.chats[k] = (w.chats || {})[k] || []; out.chatsT[k] = t; }
   });
   if ((b.draftT || 0) > (a.draftT || 0)) { out.draft = b.draft; out.draftT = b.draftT; }
+  out.analyses = Object.assign({}, a.analyses || {});
+  Object.keys(b.analyses || {}).forEach(function (k) { if (!out.analyses[k] || out.analyses[k].t < b.analyses[k].t) out.analyses[k] = b.analyses[k]; });
   var newer = (b.updatedAt || 0) > (a.updatedAt || 0) ? b : a;
   out.name = newer.name || a.name || b.name || "";
   if (newer === b && b.settings) {
@@ -510,6 +514,7 @@ var cleanup = [];
 function route() {
   cleanup.forEach(function (f) { try { f(); } catch (e) {} }); cleanup = [];
   if ("speechSynthesis" in window) speechSynthesis.cancel();
+  if (SW.closeAnalysis) SW.closeAnalysis();
   var h = (location.hash || "#home").slice(1);
   var parts = h.split("~"), v = parts[0], arg = parts[1];
   var m = $("#main");
@@ -873,7 +878,8 @@ VIEWS.write = function (m) {
     '<div class="row"><button class="btn" data-go="words">Confused words</button><a class="btn" href="#guides">Writing guides</a></div>' +
     '<div class="section card stack"><div class="row" style="justify-content:space-between"><h2>Draft</h2><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div>" +
     '<textarea id="ed" class="editor" rows="10" placeholder="Write or paste your email, message, speech or paragraph here.">' + esc(draft) + "</textarea>" +
-    '<div class="row"><button class="btn primary" id="chk">' + ico("ok") + 'Check (offline)</button><button class="btn" id="cpy">' + ico("copy") + 'Copy</button><button class="btn" data-say-ed>' + ico("play") + "Read aloud</button></div></div>" +
+    '<div class="selbar" id="selbar" hidden><span class="muted small">Selected</span><span class="selq" id="selq"></span><button class="btn primary sm" id="selGo">' + ico("spark") + 'Analyse</button></div>' +
+    '<div class="row"><button class="btn primary" id="chk">' + ico("ok") + 'Check (offline)</button><button class="btn" id="anB" title="Select a sentence, or place the cursor in one">' + ico("spark") + 'Analyse sentence</button><button class="btn" id="cpy">' + ico("copy") + 'Copy</button><button class="btn" data-say-ed>' + ico("play") + "Read aloud</button></div></div>" +
     '<div id="chkOut"></div>' +
     '<div class="section card stack"><h2>AI rewrite</h2><p class="muted small">Pick what you want. Your draft stays as it is; the result appears below.</p><div class="row" id="aiOps">' +
     [["fix", "Fix grammar & explain"], ["formal", "More formal"], ["friendly", "More friendly"], ["short", "Shorter"], ["confident", "More confident"], ["speech", "Turn into a speech"]].map(function (o) { return '<button class="chip" data-op="' + o[0] + '">' + o[1] + "</button>"; }).join("") +
@@ -917,6 +923,29 @@ VIEWS.write = function (m) {
         }).catch(function (e) { out.innerHTML = '<div class="notice">' + esc(e.message) + "</div>"; });
     };
   });
+  /* sentence analysis: select text (or put the cursor in a sentence) */
+  var helper = { S: function () { return S; }, ai: aiCall, aiReady: aiReady, toast: toast, log: logHistory, check: checkWriting,
+    replace: function (find, rep, within) {
+      var v = ed.value, base = within ? v.indexOf(within) : 0, i = base < 0 ? v.indexOf(find) : v.indexOf(find, base);
+      if (i < 0) return false;
+      ed.value = v.slice(0, i) + rep + v.slice(i + find.length); ed.oninput(); return true;
+    } };
+  function selSentence() { return SW.sentenceAt(ed.value, ed.selectionStart, ed.selectionEnd); }
+  function selChange() {
+    var bar = $("#selbar"); if (!bar) return;
+    var a = ed.selectionStart, b = ed.selectionEnd, txt = ed.value.slice(a, b).trim();
+    if (txt.split(/\s+/).length >= 2) { bar.hidden = false; var s2 = selSentence(); $("#selq").textContent = "“" + (s2.length > 70 ? s2.slice(0, 70) + "…" : s2) + "”"; }
+    else bar.hidden = true;
+  }
+  function openAn() {
+    var s2 = selSentence();
+    if (!s2 || s2.split(/\s+/).length < 2) { toast("Select a sentence, or tap inside one, then tap Analyse."); ed.focus(); return; }
+    SW.openAnalysis(s2, helper);
+  }
+  document.addEventListener("selectionchange", selChange); cleanup.push(function () { document.removeEventListener("selectionchange", selChange); });
+  ed.addEventListener("select", selChange); ed.addEventListener("keyup", selChange); ed.addEventListener("mouseup", selChange); ed.addEventListener("touchend", function () { setTimeout(selChange, 50); });
+  $("#selGo").addEventListener("mousedown", function (e) { e.preventDefault(); });
+  $("#selGo").onclick = openAn; $("#anB").onclick = openAn;
   if (location.hash === "#guides") { var gs = $("#guides"); if (gs) gs.scrollIntoView(); }
 };
 VIEWS.guides = VIEWS.write;
