@@ -20,6 +20,9 @@ var I = {
   ok: '<path d="M5 12l5 5 9-10"/>',
   brain: '<path d="M9 4a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 002 5 3 3 0 006 1V5a3 3 0 00-3-1z"/><path d="M15 4a3 3 0 013 3 3 3 0 012 5 3 3 0 01-2 5 3 3 0 01-6 1"/>',
   note: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h5"/>',
+  file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
+  folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 011-1h10"/>'
 };
 function ico(n) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + I[n] + '</svg>'; }
@@ -524,6 +527,7 @@ function route() {
   cleanup.forEach(function (f) { try { f(); } catch (e) {} }); cleanup = [];
   if ("speechSynthesis" in window) speechSynthesis.cancel();
   if (SW.closeAnalysis) SW.closeAnalysis();
+  if (typeof closeLinkMenu === "function") closeLinkMenu();
   var h = (location.hash || "#home").slice(1);
   var parts = h.split("~"), v = parts[0], arg = parts[1];
   var m = $("#main");
@@ -898,8 +902,10 @@ VIEWS.write = function (m) {
   var draft = n0 ? n0.fixed : (S.draft || ""), dT = null;
   m.innerHTML = top("Writing studio", { eyebrow: "Write" }) +
     '<div class="row"><button class="btn" data-go="notes">My notes' + (S.notes.length ? " (" + S.notes.length + ")" : "") + '</button><button class="btn" data-go="words">Confused words</button><a class="btn" href="#guides">Writing guides</a></div>' +
-    '<div class="split"><div class="col-main"><div class="section card stack"><div class="row" style="justify-content:space-between"><div class="stack" style="gap:2px;min-width:0"><h2>Draft</h2><span class="muted small" id="docLink"></span></div><div class="row tight"><button class="btn sm" id="newB">+ New draft</button><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div></div>" +
-    '<textarea id="ed" class="editor" rows="10" placeholder="Write or paste your email, message, speech or paragraph here. It is saved to My notes as you type.">' + esc(draft) + "</textarea>" +
+    '<div class="split"><div class="col-main"><div class="section card stack"><div class="row" style="justify-content:space-between"><div class="stack" style="gap:2px;min-width:0;flex:1"><label class="eyebrow" for="docTitle">Draft title</label><input id="docTitle" class="doc-title" type="text" placeholder="Untitled draft (type a title)"><span class="muted small" id="docLink"></span></div><div class="row tight"><button class="btn sm" id="newB">+ New draft</button><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div></div>" +
+    '<div id="docTags"></div>' +
+    '<textarea id="ed" class="editor" rows="10" placeholder="Write or paste your email, message, speech or paragraph here. It is saved to My notes as you type. Select text and press Ctrl+K (or right-click) to add a link.">' + esc(draft) + "</textarea>" +
+    '<div id="docLinks"></div><div id="docAtt"></div>' +
     '<div class="selbar" id="selbar" hidden><span class="muted small">Selected</span><span class="selq" id="selq"></span><button class="btn primary sm" id="selGo">' + ico("spark") + 'Analyse</button></div>' +
     '<div class="row"><button class="btn" id="chk" title="Instant grammar and style check. Works offline.">' + ico("ok") + 'Quick check</button><button class="btn" id="anB" title="Select a sentence, or place the cursor in one">' + ico("spark") + 'Analyse sentence</button><button class="btn" id="fixAll" title="AI corrects the whole draft; your original stays in the note">' + ico("spark") + 'Correct all</button><button class="btn" id="cpy">' + ico("copy") + 'Copy</button><button class="btn" data-say-ed>' + ico("play") + 'Read aloud</button><button class="btn" id="noteB">' + ico("note") + "Open note</button></div></div>" +
     '<div id="anMount"></div><div id="chkOut"></div></div><div class="col-side">' +
@@ -909,8 +915,17 @@ VIEWS.write = function (m) {
     '<div class="section" id="guides"><h2>Writing guides</h2><div class="card guide-list">' + SW.guides.map(function (g) { return '<button class="listrow" data-go="guide~' + g.id + '"><span class="grow"><span class="t">' + esc(g.title) + '</span><br><span class="d">' + esc(g.kind) + "</span></span></button>"; }).join("") + "</div></div></div></div>";
   var ed = $("#ed");
   /* The draft and its note are one document: every edit updates the note */
+  function ensureNote() {
+    commit(); var n = curNote();
+    if (!n && ed.value.trim()) { n = saveNote({ orig: ed.value, fixed: ed.value, fixes: [], source: "Writing studio" }, true); S.curNote = n.id; save(); }
+    return n;
+  }
   function updDoc() {
-    var n = curNote(), l = $("#docLink"), nb = $("#noteB");
+    var n = curNote(), l = $("#docLink"), nb = $("#noteB"), ti = $("#docTitle");
+    if (ti && document.activeElement !== ti) { ti.value = n && n.titleSet ? n.title : ""; ti.placeholder = n ? n.title + "  (auto title, type to rename)" : "Untitled draft (type a title)"; }
+    var tg = $("#docTags"); if (tg) { tg.innerHTML = tagEditorHTML(n); bindTagEditor($(".tagbox", tg), ensureNote, updDoc); }
+    var lk = $("#docLinks"); if (lk) lk.innerHTML = linksHTML(n, ed.value);
+    var da = $("#docAtt"); if (da && !da._busy) da.innerHTML = n && (n.attachments || []).length ? '<div class="links-row"><span class="eyebrow">Attachments</span>' + n.attachments.map(function (x) { return '<span class="linkchip"><a href="' + esc(x.link) + '" target="_blank" rel="noopener noreferrer">' + esc(x.name) + " ↗</a></span>"; }).join("") + "</div>" : '<p class="muted small">Drop files or a folder on this box to attach them (saved to Google Drive).</p>';
     if (l) l.innerHTML = n ? "Saved to note <b>" + esc(n.title) + "</b> · " + (n.fixes || []).filter(function (f) { return f.r; }).length + " fixes" : "New draft · saved to My notes once you write a few words";
     if (nb) nb.disabled = !n;
   }
@@ -972,6 +987,34 @@ VIEWS.write = function (m) {
     commit(); S.curNote = ""; ed.value = t.text; commit(); toast("New draft from template");
   };
   updDoc();
+  bindAttach(ed.closest(".card"), ensureNote, function (m, html) { var da = $("#docAtt"); if (!da) return; da._busy = !/Uploaded|failed|offline/i.test(m); da.innerHTML = '<p class="small">' + (html ? m : esc(m)) + "</p>"; }, function () { var da = $("#docAtt"); if (da) da._busy = false; setTimeout(updDoc, 1500); });
+  $("#docTitle").onchange = function () {
+    var v = this.value.trim(), n = ensureNote();
+    if (!n) { toast("Write something first, then add a title."); this.value = ""; return; }
+    n.title = v || noteTitle(n.fixed); n.titleSet = !!v; n.u = Date.now(); save(); this.blur(); updDoc(); toast(v ? "Title saved" : "Using the automatic title");
+  };
+  $("#docTitle").onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); this.blur(); } };
+  $("#docLinks").onclick = function (e) { var b = e.target.closest("[data-unlink]"); if (b) { unlink(curNote(), b.getAttribute("data-unlink")); updDoc(); toast("Link removed"); } };
+  /* links: select text, then Ctrl+K / ⌘K or right-click */
+  var lastXY = null;
+  function selText() { return ed.value.slice(ed.selectionStart, ed.selectionEnd).trim(); }
+  function linkMenuAt(x, y, extra) {
+    var t = selText();
+    if (!t) { toast("Select a word or sentence first, then press Ctrl+K."); return; }
+    openLinkMenu({ x: x, y: y, text: t, note: function (create) { return create ? ensureNote() : curNote(); }, extra: extra, onDone: updDoc });
+  }
+  ed.addEventListener("mousemove", function (e) { lastXY = [e.clientX, e.clientY]; });
+  ed.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      var r = ed.getBoundingClientRect(); linkMenuAt(lastXY ? lastXY[0] : r.left + 24, lastXY ? lastXY[1] + 12 : r.top + 48);
+    }
+  });
+  ed.addEventListener("contextmenu", function (e) {
+    if (!selText()) return;
+    e.preventDefault();
+    linkMenuAt(e.clientX, e.clientY, [["Analyse sentence", function () { openAn(); }], ["Copy", function () { var t = selText(); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { toast("Copied"); }).catch(function () { toast("Use your keyboard to copy."); }); }]]);
+  });
   $("[data-say-ed]").onclick = function () { if (ed.value.trim()) say(ed.value); };
   $("#cpy").onclick = function () {
     var v = ed.value; if (!v) return;
@@ -1279,7 +1322,282 @@ function relDate(t) {
 }
 function wordCount(s) { return (String(s).match(/\S+/g) || []).length; }
 
-var NS = { q: "", only: "all", hide: false, changedOnly: true };
+/* ---------- Google Drive: note attachments and Google Docs ---------- */
+function qEsc(s) { return String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
+function dchild(name, parent) {
+  var q = "name='" + qEsc(name) + "' and mimeType='" + FOLDER_MIME + "' and trashed=false and '" + parent + "' in parents";
+  return gfetch(DAPI + "?spaces=drive&fields=files(id)&q=" + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (j) {
+    if (j.files && j.files[0]) return j.files[0].id;
+    return gfetch(DAPI + "?fields=id", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name, mimeType: FOLDER_MIME, parents: [parent] }) }).then(function (r) { return r.json(); }).then(function (x) { return x.id; });
+  });
+}
+function safeName(s) { return String(s || "Untitled").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "Untitled"; }
+function noteFolder(n) {
+  return dfolder().then(function (root) { return dchild("Attachments", root); }).then(function (att) {
+    return dchild(safeName(n.title) + " · " + n.id.slice(-5), att);
+  }).then(function (id) { n.folderId = id; return id; });
+}
+function dupload(file, parent, onProgress) {
+  var meta = { name: file.name, parents: [parent] };
+  return gfetch(UAPI + "?uploadType=resumable&fields=id,name,mimeType,size,webViewLink", {
+    method: "POST", headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": file.type || "application/octet-stream" }, body: JSON.stringify(meta)
+  }).then(function (r) {
+    var loc = r.headers.get("Location");
+    if (!loc) throw new Error("Google Drive didn't accept the upload. Try again.");
+    return new Promise(function (res, rej) {
+      var x = new XMLHttpRequest(); x.open("PUT", loc);
+      x.upload.onprogress = function (e) { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
+      x.onload = function () { if (x.status >= 200 && x.status < 300) { try { res(JSON.parse(x.responseText)); } catch (e) { rej(new Error("Upload finished but Drive's reply couldn't be read.")); } } else rej(new Error("Upload of " + file.name + " failed (" + x.status + ").")); };
+      x.onerror = function () { rej(new Error("Upload of " + file.name + " failed. Check your connection.")); };
+      x.send(file);
+    });
+  });
+}
+/* Collect files from a drop, keeping folder structure */
+function collectDropped(dt) {
+  var items = dt.items ? Array.prototype.slice.call(dt.items) : [];
+  var entries = items.map(function (it) { return it.webkitGetAsEntry && it.webkitGetAsEntry(); }).filter(Boolean);
+  if (!entries.length) return Promise.resolve(Array.prototype.slice.call(dt.files || []).map(function (f) { return { file: f, path: [] }; }));
+  var out = [];
+  function walk(entry, path) {
+    if (entry.isFile) return new Promise(function (res) { entry.file(function (f) { out.push({ file: f, path: path }); res(); }, function () { res(); }); });
+    if (entry.isDirectory) {
+      var reader = entry.createReader(), all = [];
+      return new Promise(function (res) {
+        (function more() { reader.readEntries(function (batch) { if (!batch.length) { Promise.all(all.map(function (e) { return walk(e, path.concat(entry.name)); })).then(res); } else { all = all.concat(Array.prototype.slice.call(batch)); more(); } }, function () { res(); }); })();
+      });
+    }
+    return Promise.resolve();
+  }
+  return Promise.all(entries.map(function (e) { return walk(e, []); })).then(function () { return out; });
+}
+function fmtSize(b) { b = Number(b) || 0; return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : b > 1024 ? Math.round(b / 1024) + " KB" : b + " B"; }
+/* Upload a list of {file, path} into the note's Drive folder */
+function uploadToNote(n, list, ui) {
+  if (!list.length) return Promise.resolve();
+  var cache = {};
+  function folderFor(base, path) {
+    if (!path.length) return Promise.resolve(base);
+    var key = path.join("/");
+    if (cache[key]) return cache[key];
+    cache[key] = folderFor(base, path.slice(0, -1)).then(function (p) { return dchild(path[path.length - 1], p); });
+    return cache[key];
+  }
+  return getToken().then(function () { return n.folderId ? Promise.resolve(n.folderId) : noteFolder(n); }).then(function (base) {
+    var tops = {}, done = 0, chain = Promise.resolve();
+    list.forEach(function (it) {
+      chain = chain.then(function () {
+        ui("Uploading " + (done + 1) + " of " + list.length + ": " + it.file.name);
+        return folderFor(base, it.path).then(function (pid) {
+          return dupload(it.file, pid, function (f) { ui("Uploading " + (done + 1) + " of " + list.length + ": " + it.file.name + " · " + Math.round(f * 100) + "%"); });
+        }).then(function (r) {
+          done++;
+          if (it.path.length) { var top0 = it.path[0]; tops[top0] = (tops[top0] || 0) + 1; }
+          else { n.attachments = n.attachments || []; n.attachments.push({ id: r.id, name: r.name, size: Number(r.size) || it.file.size, mime: r.mimeType, link: r.webViewLink, t: Date.now() }); }
+          n.u = Date.now(); save();
+        });
+      });
+    });
+    return chain.then(function () {
+      var names = Object.keys(tops);
+      return Promise.all(names.map(function (nm) { return folderFor(base, [nm]); })).then(function (ids) {
+        names.forEach(function (nm, i) {
+          n.attachments = (n.attachments || []).filter(function (a) { return !(a.folder && a.id === ids[i]); });
+          n.attachments.push({ id: ids[i], name: nm, folder: true, count: tops[nm], link: "https://drive.google.com/drive/folders/" + ids[i], t: Date.now() });
+        });
+        n.u = Date.now(); save();
+        return done;
+      });
+    });
+  });
+}
+/* Google Doc copy of a note, for sharing from Drive */
+function noteDocHTML(n) {
+  var pairs = sentencePairs(n.orig, n.fixed).filter(function (p) { return p.changed; });
+  var fx = (n.fixes || []).filter(function (f) { return !f.big && f.from && f.to; });
+  var body = linkify(esc(n.fixed), (n.links || []).filter(function (l) { return !/^#note~/.test(l.url); })).replace(/\n/g, "<br>");
+  return "<html><body><h1>" + esc(n.title) + "</h1>" +
+    "<p>" + body + "</p>" +
+    (pairs.length ? "<h2>Corrections</h2><table border='1' cellpadding='6' style='border-collapse:collapse'><tr><th>My version</th><th>Correct</th></tr>" + pairs.map(function (p) { return "<tr><td>" + p.aH.replace(/<del class="nm-del">/g, "<s style='color:#b8322f'>").replace(/<\/del>/g, "</s>") + "</td><td>" + p.bH.replace(/<ins class="nm-ins">/g, "<b style='color:#1f7a52'>").replace(/<\/ins>/g, "</b>") + "</td></tr>"; }).join("") + "</table>" : "") +
+    (fx.length ? "<h3>Why</h3><ul>" + fx.map(function (f) { return "<li>" + esc(f.from) + " → <b>" + esc(f.to) + "</b>: " + esc(f.why || "") + "</li>"; }).join("") + "</ul>" : "") +
+    ((n.attachments || []).length ? "<h3>Attachments</h3><ul>" + n.attachments.map(function (a) { return "<li><a href='" + esc(a.link) + "'>" + esc(a.name) + "</a></li>"; }).join("") + "</ul>" : "") +
+    ((n.tags || []).length ? "<p>Tags: " + n.tags.map(function (t) { return "#" + esc(t); }).join(" ") + "</p>" : "") +
+    "<p style='color:#888'>Saved from Speakwell · " + new Date(n.u).toLocaleString() + "</p></body></html>";
+}
+function saveNoteDoc(n) {
+  var html = noteDocHTML(n);
+  return getToken().then(function () {
+    if (n.docId) {
+      return gfetch(UAPI + "/" + n.docId + "?uploadType=media&fields=id,webViewLink", { method: "PATCH", headers: { "Content-Type": "text/html; charset=UTF-8" }, body: html })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (n.title) return gfetch(DAPI + "/" + n.docId + "?fields=id,webViewLink", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n.title }) }).then(function (r) { return r.json(); }); return j; })
+        .catch(function (e) { if (e.status === 404) { n.docId = ""; return saveNoteDoc(n); } throw e; });
+    }
+    return dfolder().then(function (root) { return dchild("Notes", root); }).then(function (pid) {
+      var b = "sw" + Date.now(), meta = { name: n.title || "Speakwell note", mimeType: "application/vnd.google-apps.document", parents: [pid] };
+      var data = "--" + b + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + JSON.stringify(meta) + "\r\n--" + b + "\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n" + html + "\r\n--" + b + "--";
+      return gfetch(UAPI + "?uploadType=multipart&fields=id,webViewLink", { method: "POST", headers: { "Content-Type": "multipart/related; boundary=" + b }, body: data }).then(function (r) { return r.json(); });
+    });
+  }).then(function (j) { n.docId = j.id; n.docLink = j.webViewLink || ("https://docs.google.com/document/d/" + j.id + "/edit"); n.u = Date.now(); save(); return n; });
+}
+function setDocPublic(n, on) {
+  return getToken().then(function () {
+    if (on) return gfetch(DAPI + "/" + n.docId + "/permissions?fields=id", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: "reader", type: "anyone" }) });
+    return gfetch(DAPI + "/" + n.docId + "/permissions/anyoneWithLink", { method: "DELETE" }).catch(function (e) { if (e.status !== 404) throw e; });
+  }).then(function () { n.docPublic = !!on; n.u = Date.now(); save(); });
+}
+function trashDrive(id) { return getToken().then(function () { return gfetch(DAPI + "/" + id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trashed: true }) }); }); }
+function shareText(n, both) {
+  var t = n.title + "\n\n" + n.fixed;
+  if (both) {
+    var pairs = sentencePairs(n.orig, n.fixed).filter(function (p) { return p.changed; });
+    if (pairs.length) t += "\n\nCorrections:\n" + pairs.map(function (p) { return "✗ " + p.a + "\n✓ " + p.b; }).join("\n\n");
+  }
+  var ls = (n.links || []).filter(function (l) { return !/^#note~/.test(l.url); });
+  if (ls.length) t += "\n\nLinks:\n" + ls.map(function (l) { return l.text + ": " + l.url; }).join("\n");
+  var at = n.attachments || [];
+  if (at.length) t += "\n\nAttachments:\n" + at.map(function (a) { return a.name + ": " + a.link; }).join("\n");
+  return t;
+}
+function copyText(t) { return (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { toast("Copied"); }).catch(function () { toast("Couldn't copy here. Use Share instead."); }); }
+
+function attListHTML(n) {
+  var at = (n && n.attachments) || [];
+  if (!at.length) return '<p class="muted small">No attachments yet.</p>';
+  return '<div class="att-list">' + at.slice().sort(function (a, b) { return b.t - a.t; }).map(function (a) {
+    return '<div class="att" data-att="' + esc(a.id) + '"><span class="att-ic">' + ico(a.folder ? "folder" : "file") + '</span><a href="' + esc(a.link) + '" target="_blank" rel="noopener noreferrer" class="att-name">' + esc(a.name) + '</a><span class="muted small">' + (a.folder ? a.count + " file" + (a.count === 1 ? "" : "s") : fmtSize(a.size)) + "</span>" +
+      '<button type="button" class="btn sm ghost" data-a="attRm">Remove</button><span class="row tight" data-attc hidden><button type="button" class="btn sm" data-a="attRmN">Keep in Drive, remove here</button><button type="button" class="btn sm" data-a="attRmT" style="color:var(--bad)">Move to Drive trash</button></span></div>';
+  }).join("") + "</div>";
+}
+/* drag-and-drop + pickers → Google Drive */
+function bindAttach(zone, getNote, ui, after) {
+  var pending = null;
+  function start(list) {
+    if (!list.length) return;
+    var n = getNote(); if (!n) { toast("Write something first, then attach files."); return; }
+    if (!online()) { ui("You're offline. Connect to the internet to upload to Google Drive."); return; }
+    if (!tokenValid()) { pending = list; ui('<button type="button" class="btn sm primary" data-upgo>Sign in to Google and upload ' + list.length + " file" + (list.length > 1 ? "s" : "") + "</button>", true); return; }
+    run(n, list);
+  }
+  function run(n, list) {
+    uploadToNote(n, list, function (m) { ui(esc(m), true); }).then(function (c) { M.on = M.on || true; saveMeta(); ui("Uploaded " + c + " file" + (c === 1 ? "" : "s") + " to Google Drive.", true); toast("Saved to Google Drive"); after(); })
+      .catch(function (e) { ui('<span style="color:var(--bad)">' + esc(e.message) + "</span>", true); });
+  }
+  zone.addEventListener("dragover", function (e) { if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") > -1) { e.preventDefault(); zone.classList.add("drag"); } });
+  zone.addEventListener("dragleave", function (e) { if (!zone.contains(e.relatedTarget)) zone.classList.remove("drag"); });
+  zone.addEventListener("drop", function (e) {
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault(); zone.classList.remove("drag");
+    collectDropped(e.dataTransfer).then(start);
+  });
+  zone.addEventListener("click", function (e) {
+    if (e.target.closest("[data-upgo]") && pending) { var n = getNote(), l = pending; pending = null; run(n, l); }
+  });
+  $$('input[type=file]', zone).forEach(function (inp) {
+    inp.addEventListener("change", function () {
+      var list = Array.prototype.slice.call(inp.files || []).map(function (f) { var parts = (f.webkitRelativePath || "").split("/").filter(Boolean); return { file: f, path: parts.slice(0, -1) }; });
+      inp.value = ""; start(list);
+    });
+  });
+}
+function dropZoneHTML(id) {
+  return '<div class="dropzone" id="' + id + '"><p><b>Drop files or folders here</b> <span class="muted">or</span></p><div class="row tight" style="justify-content:center"><label class="btn sm">' + ico("file") + 'Add files<input type="file" multiple hidden></label><label class="btn sm">' + ico("folder") + 'Add folder<input type="file" webkitdirectory multiple hidden></label></div><p class="small" data-upmsg aria-live="polite"></p></div>';
+}
+/* ---------- Note titles, tags and links ---------- */
+function cleanTag(t) { return String(t || "").toLowerCase().replace(/^#+/, "").replace(/[^a-z0-9ऀ-ॿ]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30); }
+function tagEditorHTML(n) {
+  var user = (n && n.tags) || [];
+  return '<div class="tagbox">' + user.map(function (t) { return '<span class="tagchip">#' + esc(t) + '<button type="button" data-untag="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + '">×</button></span>'; }).join("") +
+    '<input class="taginput" type="text" autocapitalize="off" placeholder="' + (user.length ? "Add tag" : "Add tags, e.g. ngdr, email") + '" aria-label="Add a tag"></div>';
+}
+function bindTagEditor(box, getNote, onChange) {
+  var inp = $(".taginput", box); if (!inp) return;
+  function add(v) {
+    var n = getNote(); if (!n) { toast("Write something first, then add tags."); return; }
+    n.tags = n.tags || [];
+    v.split(/[,;]+|\s+/).map(cleanTag).filter(Boolean).forEach(function (t) { if (n.tags.indexOf(t) < 0) n.tags.push(t); });
+    n.u = Date.now(); save(); onChange(); var again = $(".taginput", box.isConnected ? box : document); if (again) again.focus();
+  }
+  inp.onkeydown = function (e) {
+    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); var v0 = inp.value; inp.value = ""; if (v0.trim()) add(v0); }
+    else if (e.key === "Backspace" && !inp.value) { var n = getNote(); if (n && n.tags && n.tags.length) { n.tags.pop(); n.u = Date.now(); save(); onChange(); } }
+  };
+  inp.onchange = function () { var v0 = inp.value; inp.value = ""; if (v0.trim()) setTimeout(function () { add(v0); }, 0); };
+  box.onclick = function (e) {
+    var b = e.target.closest("[data-untag]");
+    if (b) { var n = getNote(); if (!n) return; var t = b.getAttribute("data-untag"); n.tags = (n.tags || []).filter(function (x) { return x !== t; }); n.u = Date.now(); save(); onChange(); }
+    else if (e.target === box) inp.focus();
+  };
+}
+function normUrl(u) {
+  u = String(u || "").trim(); if (!u) return "";
+  if (/^#note~[\w-]+$/.test(u)) return u;
+  if (/^(https?:\/\/|mailto:)\S+$/i.test(u)) return u;
+  if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(u)) return "mailto:" + u;
+  if (/^(www\.)?[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(u)) return "https://" + u;
+  return "";
+}
+function linkify(html, links) {
+  var tokens = [];
+  (links || []).slice().sort(function (a, b) { return b.text.length - a.text.length; }).forEach(function (l) {
+    var t = esc(l.text); if (!t || html.indexOf(t) < 0) return;
+    var k = tokens.length;
+    var inner = /^#note~/.test(l.url), tn = inner && S.notes.filter(function (x) { return "#note~" + x.id === l.url; })[0];
+    tokens.push('<a class="nlink' + (inner ? " inner" : "") + '" href="' + esc(l.url) + '"' + (inner ? "" : ' target="_blank" rel="noopener noreferrer"') + ' title="' + esc(inner ? "Note: " + (tn ? tn.title : "deleted note") : l.url) + '">' + t + "</a>");
+    html = html.split(t).join("\u0001" + k + "\u0002");
+  });
+  return html.replace(/\u0001(\d+)\u0002/g, function (m0, k) { return tokens[+k]; });
+}
+function linksHTML(n, text) {
+  var ls = (n && n.links) || [];
+  if (!ls.length) return "";
+  return '<div class="links-row"><span class="eyebrow">Links</span>' + ls.map(function (l) {
+    var gone = text != null && text.indexOf(l.text) < 0;
+    var inner = /^#note~/.test(l.url), tn = inner && S.notes.filter(function (x) { return "#note~" + x.id === l.url; })[0];
+    return '<span class="linkchip' + (gone ? " gone" : "") + (inner ? " inner" : "") + '" title="' + (gone ? "This text is no longer in the draft" : esc(inner ? "Note: " + (tn ? tn.title : "deleted note") : l.url)) + '"><a href="' + esc(l.url) + '"' + (inner ? "" : ' target="_blank" rel="noopener noreferrer"') + ">" + esc(l.text.length > 40 ? l.text.slice(0, 40) + "…" : l.text) + (inner ? " → " + esc(tn ? tn.title.slice(0, 30) : "deleted note") : " ↗") + '</a><button type="button" data-unlink="' + esc(l.text) + '" aria-label="Remove link">×</button></span>';
+  }).join("") + "</div>";
+}
+function closeLinkMenu() { var o = $("#lmenu"); if (o) o.remove(); document.removeEventListener("mousedown", lmOutside, true); }
+function lmOutside(e) { var o = $("#lmenu"); if (o && !o.contains(e.target)) closeLinkMenu(); }
+/* opts: { x, y, text, note: function(create) → note, extra: [[label, fn]], onDone } */
+function openLinkMenu(opts) {
+  closeLinkMenu();
+  var n = opts.note(false), ex = n && (n.links || []).filter(function (l) { return l.text === opts.text; })[0];
+  var t = opts.text.length > 60 ? opts.text.slice(0, 60) + "…" : opts.text;
+  var el = document.createElement("div"); el.className = "lmenu"; el.id = "lmenu"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "Add link");
+  var others = S.notes.filter(function (x) { return !n || x.id !== n.id; }).sort(function (a, b) { return b.u - a.u; });
+  var isNote = ex && /^#note~/.test(ex.url);
+  el.innerHTML = '<p class="small"><b>Link</b> <span class="muted">“' + esc(t) + '”</span></p>' +
+    '<div class="row tight"><button type="button" class="chip' + (isNote ? "" : " on") + '" data-lmt="web">Web or email</button><button type="button" class="chip' + (isNote ? " on" : "") + '" data-lmt="note"' + (others.length ? "" : " disabled") + '>Another note</button></div>' +
+    '<div class="row tight" id="lmNoteRow" style="flex-wrap:nowrap"' + (isNote ? "" : " hidden") + '><select id="lmNote" style="min-width:0;flex:1">' + others.map(function (x) { return '<option value="#note~' + x.id + '"' + (ex && ex.url === "#note~" + x.id ? " selected" : "") + ">" + esc(x.title) + "</option>"; }).join("") + '</select><button type="button" class="btn sm primary" id="lmOkN">' + (ex ? "Update" : "Add") + "</button></div>" +
+    '<div class="row tight" id="lmWebRow" style="flex-wrap:nowrap"' + (isNote ? " hidden" : "") + '><input id="lmUrl" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://… or name@mail.com" value="' + esc(ex ? ex.url : "") + '"><button type="button" class="btn sm primary" id="lmOk">' + (ex ? "Update" : "Add") + "</button></div>" +
+    '<p class="small" id="lmErr" hidden style="color:var(--bad)">Enter a web address (https://…) or an email address.</p>' +
+    (ex ? '<button type="button" class="btn sm ghost" id="lmDel" style="color:var(--bad)">Remove link</button>' : "") +
+    (opts.extra && opts.extra.length ? '<hr class="sep"><div class="row tight">' + opts.extra.map(function (x, i) { return '<button type="button" class="btn sm" data-lmx="' + i + '">' + x[0] + "</button>"; }).join("") + "</div>" : "") +
+    '<p class="muted small">Tip: select text, then Ctrl+K or right-click.</p>';
+  document.body.appendChild(el);
+  var w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(8, Math.min(opts.x, window.innerWidth - w - 8)) + "px";
+  el.style.top = Math.max(8, Math.min(opts.y, window.innerHeight - h - 8)) + "px";
+  var url = $("#lmUrl"); if (!isNote) setTimeout(function () { url.focus(); url.select(); }, 20);
+  if (isNote) url.value = "";
+  $$("[data-lmt]", el).forEach(function (b) { b.onclick = function () { var nt = b.getAttribute("data-lmt") === "note"; $$("[data-lmt]", el).forEach(function (x) { x.classList.toggle("on", x === b); }); $("#lmNoteRow").hidden = !nt; $("#lmWebRow").hidden = nt; $("#lmErr").hidden = true; }; });
+  function ok(fromNote) {
+    var u = fromNote === true ? $("#lmNote").value : normUrl(url.value); if (!u) { $("#lmErr").hidden = false; url.focus(); return; }
+    var note = opts.note(true); if (!note) { toast("Write something first."); closeLinkMenu(); return; }
+    note.links = (note.links || []).filter(function (l) { return l.text !== opts.text; });
+    note.links.push({ text: opts.text, url: u }); note.u = Date.now(); save();
+    closeLinkMenu(); toast(ex ? "Link updated" : "Link added"); if (opts.onDone) opts.onDone();
+  }
+  $("#lmOk").onclick = function () { ok(false); }; if ($("#lmOkN")) $("#lmOkN").onclick = function () { ok(true); };
+  url.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); ok(false); } if (e.key === "Escape") closeLinkMenu(); };
+  if ($("#lmDel")) $("#lmDel").onclick = function () { var note = opts.note(false); note.links = (note.links || []).filter(function (l) { return l.text !== opts.text; }); note.u = Date.now(); save(); closeLinkMenu(); toast("Link removed"); if (opts.onDone) opts.onDone(); };
+  $$("[data-lmx]", el).forEach(function (b) { b.onclick = function () { var f = opts.extra[+b.getAttribute("data-lmx")][1]; closeLinkMenu(); f(); }; });
+  setTimeout(function () { document.addEventListener("mousedown", lmOutside, true); }, 0);
+}
+function unlink(n, text) { if (!n) return; n.links = (n.links || []).filter(function (l) { return l.text !== text; }); n.u = Date.now(); save(); }
+
+var NS = { q: "", only: "all", hide: false, changedOnly: true, tag: "", share: "" };
 VIEWS.notes = function (m, id) {
   if (autoMergeNotes()) toast("Notes from the same draft were combined");
   var wide = window.matchMedia("(min-width: 900px)").matches;
@@ -1290,15 +1608,17 @@ VIEWS.notes = function (m, id) {
   function list() {
     var items = all.filter(function (n) {
       if (NS.only === "due" && n.lastRev && Date.now() - n.lastRev < 3 * 864e5) return false;
-      return !NS.q || (n.title + " " + n.orig + " " + n.fixed + " " + noteTags(n).join(" ")).toLowerCase().indexOf(NS.q) > -1;
+      if (NS.tag && (n.tags || []).indexOf(NS.tag) < 0 && noteTags(n).indexOf(NS.tag) < 0) return false;
+      return !NS.q || (n.title + " " + n.orig + " " + n.fixed + " " + (n.tags || []).join(" ") + " " + noteTags(n).join(" ")).toLowerCase().indexOf(NS.q) > -1;
     });
     return '<div class="nl"><div class="nl-head"><h2>All notes <span class="muted small">' + all.length + '</span></h2><button class="icon-btn" data-go="write" aria-label="New draft" title="New draft">+</button></div>' +
       '<input id="nq" type="search" placeholder="Search all notes" value="' + esc(NS.q) + '">' +
       '<div class="row tight"><button class="chip' + (NS.only === "all" ? " on" : "") + '" data-nf="all">All</button><button class="chip' + (NS.only === "due" ? " on" : "") + '" data-nf="due">Due for revision</button></div>' +
+      (function () { var tg = {}; all.forEach(function (n) { (n.tags || []).forEach(function (t) { tg[t] = (tg[t] || 0) + 1; }); }); var ks = Object.keys(tg).sort(); return ks.length ? '<div class="row tight"><span class="eyebrow">Tags</span>' + ks.map(function (t) { return '<button class="chip' + (NS.tag === t ? " on" : "") + '" data-ntag="' + esc(t) + '">#' + esc(t) + " " + tg[t] + "</button>"; }).join("") + "</div>" : ""; })() +
       '<div class="nl-items">' + (items.length ? items.map(function (n) {
         var pairs = sentencePairs(n.orig, n.fixed), ch = pairs.filter(function (p) { return p.changed; }).length;
         return '<button class="nl-item' + (cur && cur.id === n.id ? " on" : "") + '" data-go="note~' + n.id + '"><b>' + esc(n.title) + "</b>" + (S.curNote === n.id ? '<span class="pill ok" style="align-self:flex-start">Open in Write</span>' : "") + '<span class="nl-prev">' + esc(n.fixed.replace(/\s+/g, " ").slice(0, 90)) + '</span><span class="nl-meta">' + relDate(n.u) + " · " + (n.pending ? "not corrected yet" : ch + " of " + pairs.length + " sentences fixed") + " · " + wordCount(n.fixed) + " words</span>" +
-          (noteTags(n).length ? '<span class="nl-tags">' + noteTags(n).map(function (t) { return "<i>#" + esc(t) + "</i>"; }).join("") + "</span>" : "") + "</button>";
+          ((n.tags || []).length || noteTags(n).length ? '<span class="nl-tags">' + (n.tags || []).map(function (t) { return '<i class="u">#' + esc(t) + "</i>"; }).join("") + noteTags(n).map(function (t) { return "<i>#" + esc(t) + "</i>"; }).join("") + "</span>" : "") + "</button>";
       }).join("") : '<p class="muted small" style="padding:12px">' + (all.length ? "No notes match." : "No notes yet. In the Writing studio, fix a sentence or tap Save as note.") + "</p>") + "</div></div>";
   }
   function detail(n) {
@@ -1316,15 +1636,29 @@ VIEWS.notes = function (m, id) {
     }).join("");
     var rest = fx.filter(function (f, i) { return !used[i]; });
     return '<div class="nd">' + (wide ? "" : '<button class="btn sm ghost" data-go="notes">' + ico("back") + "All notes</button>") +
-      '<input class="nd-title" id="ndTitle" value="' + esc(n.title) + '" aria-label="Note title">' +
+      '<label class="eyebrow" for="ndTitle">Title</label><div class="nd-titlewrap"><input class="nd-title" id="ndTitle" value="' + esc(n.title) + '" placeholder="Add a title"><span class="muted" aria-hidden="true">' + ico("write") + "</span></div>" +
       '<p class="muted small">' + new Date(n.t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + " · " + esc(n.source || "") + " · " + wordCount(n.fixed) + " words" + (n.revised ? " · revised " + n.revised + "×" : "") + "</p>" +
-      (noteTags(n).length ? '<div class="nl-tags">' + noteTags(n).map(function (t) { return "<i>#" + esc(t) + "</i>"; }).join("") + "</div>" : "") +
+      '<div id="ndTags">' + tagEditorHTML(n) + "</div>" +
+      (noteTags(n).length ? '<div class="nl-tags"><span class="muted small">Topics:</span>' + noteTags(n).map(function (t) { return "<i>#" + esc(t) + "</i>"; }).join("") + "</div>" : "") +
       '<div class="nd-stats"><div><b>' + ch.length + "</b><span>sentences fixed</span></div><div><b>" + (pairs.length - ch.length) + "</b><span>already correct</span></div><div><b>" + fx.length + "</b><span>corrections</span></div></div>" +
-      '<div class="row tight"><button class="btn sm" data-a="say">' + ico("play") + 'Hear correct</button><button class="btn sm" data-a="rev">' + ico("ok") + 'Revised</button><button class="btn sm primary" data-a="edit">' + ico("write") + 'Edit draft</button>' +
+      '<div class="row tight"><button class="btn sm" data-a="say">' + ico("play") + 'Hear correct</button><button class="btn sm" data-a="rev">' + ico("ok") + 'Revised</button><button class="btn sm" data-a="share">' + ico("share") + 'Share</button><button class="btn sm primary" data-a="edit">' + ico("write") + 'Edit draft</button>' +
       (n.pending ? '<button class="btn sm primary" data-a="ai">Correct with AI</button>' : "") + '<button class="btn sm ghost" data-a="del" style="color:var(--bad)">Delete</button>' +
       '<span class="row tight" id="ndConf" hidden><span class="small">Delete this note?</span><button class="btn sm" data-a="delY" style="color:var(--bad)">Yes</button><button class="btn sm" data-a="delN">No</button></span></div>' +
+      '<div class="card share-panel" id="ndShare"' + (NS.share === n.id ? "" : " hidden") + '><h3>Share this note</h3>' +
+      '<div class="row tight">' + (navigator.share ? '<button class="btn sm primary" data-a="shSys">' + ico("share") + "Share…</button>" : "") +
+      '<a class="btn sm" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(shareText(n, false)) + '">WhatsApp</a>' +
+      '<a class="btn sm" href="mailto:?subject=' + encodeURIComponent(n.title) + "&body=" + encodeURIComponent(shareText(n, false).slice(0, 1800)) + '">Email</a>' +
+      '<button class="btn sm" data-a="shCopy">' + ico("copy") + 'Copy text</button><button class="btn sm" data-a="shCopy2">Copy with corrections</button></div>' +
+      '<hr class="sep"><div class="stack" style="gap:8px"><p class="small"><b>Google Docs</b> <span class="muted">A copy of the note (final text, corrections, links, attachments) in Drive › Speakwell › Notes. Share it from Google Docs, or turn on a view link.</span></p>' +
+      (n.docId ? '<div class="row tight"><a class="btn sm" target="_blank" rel="noopener" href="' + esc(n.docLink) + '">Open in Google Docs</a><button class="btn sm" data-a="shDoc">Update the Doc</button></div>' +
+        '<label class="row small" for="shPub"><input type="checkbox" id="shPub"' + (n.docPublic ? " checked" : "") + "> Anyone with the link can view</label>" +
+        (n.docPublic ? '<div class="row tight" style="flex-wrap:nowrap"><input type="text" readonly value="' + esc(n.docLink) + '" id="shLink" style="min-width:0"><button class="btn sm" data-a="shLinkCopy">Copy link</button></div>' : "")
+        : '<div class="row tight"><button class="btn sm" data-a="shDoc">Save as Google Doc</button></div>') +
+      '<p class="small" id="shMsg" aria-live="polite"></p></div></div>' +
       (S.notes.length > 1 ? '<div class="row tight"><label class="small muted" for="ndMerge">Merge another note into this one</label><select id="ndMerge" style="width:auto;min-width:0;flex:1;max-width:340px"><option value="">Choose a note…</option>' + S.notes.filter(function (x) { return x.id !== n.id; }).sort(function (a, b) { return b.u - a.u; }).map(function (x) { return '<option value="' + x.id + '">' + esc(x.title) + " · " + relDate(x.u) + "</option>"; }).join("") + '</select><button class="btn sm" data-a="merge">Merge</button></div>' : "") +
-      '<div class="section"><h2>Full text</h2><div class="nm-grid"><div class="nm-box nm-wrong"><span class="eyebrow">Your version (draft)</span><p class="hbody">' + esc(n.orig) + '</p></div><div class="nm-box nm-right"><span class="eyebrow">Correct</span><p class="hbody">' + esc(n.fixed) + "</p></div></div></div>" +
+      '<div class="section"><h2>Full text</h2><div class="nm-grid"><div class="nm-box nm-wrong"><span class="eyebrow">Your version (draft)</span><p class="hbody" data-sel>' + linkify(esc(n.orig), n.links) + '</p></div><div class="nm-box nm-right"><span class="eyebrow">Correct</span><p class="hbody" data-sel>' + linkify(esc(n.fixed), n.links) + "</p></div></div>" +
+      '<div id="ndLinks">' + linksHTML(n, n.fixed) + '</div><p class="muted small">Select any word or sentence above, then press Ctrl+K or right-click to add a link.</p></div>' +
+      '<div class="section"><div class="row" style="justify-content:space-between"><h2>Attachments</h2><span class="muted small">Saved in Google Drive › Speakwell › Attachments</span></div>' + dropZoneHTML("ndDrop") + '<div id="ndAttList">' + attListHTML(n) + "</div></div>" +
       '<div class="section"><div class="row" style="justify-content:space-between"><h2>Fixed sentences</h2><span class="muted small">' + ch.length + " of " + pairs.length + ' sentences</span></div></div>' +
       '<div class="row tight"><button class="chip' + (NS.changedOnly ? " on" : "") + '" data-a="changed">Fixed sentences only</button><button class="chip' + (NS.hide ? " on" : "") + '" data-a="hide">Revision mode</button></div>' +
       (NS.hide ? '<div class="notice info">Corrections are hidden. Read your version, say the correct sentence aloud, then tap Reveal.</div>' : "") +
@@ -1339,8 +1673,30 @@ VIEWS.notes = function (m, id) {
   var q = $("#nq");
   if (q) q.oninput = function () { var p = this.selectionStart; NS.q = this.value.toLowerCase(); VIEWS.notes(m, cur && wide ? cur.id : null); var q2 = $("#nq"); q2.focus(); q2.setSelectionRange(p, p); };
   $$("[data-nf]").forEach(function (b) { b.onclick = function () { NS.only = b.getAttribute("data-nf"); route(); }; });
+  $$("[data-ntag]").forEach(function (b) { b.onclick = function () { var t = b.getAttribute("data-ntag"); NS.tag = NS.tag === t ? "" : t; route(); }; });
   if (!cur) return;
-  $("#ndTitle").onchange = function () { cur.title = this.value.trim() || noteTitle(cur.fixed); cur.titleSet = true; cur.u = Date.now(); save(); route(); };
+  $("#ndTitle").onchange = function () { var v = this.value.trim(); cur.title = v || noteTitle(cur.fixed); cur.titleSet = !!v; cur.u = Date.now(); save(); toast(v ? "Title saved" : "Using the automatic title"); route(); };
+  $("#ndTitle").onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); this.blur(); } };
+  if ($("#shPub")) $("#shPub").onchange = function () {
+    var on = this.checked, box = this; box.disabled = true;
+    setDocPublic(cur, on).then(function () { toast(on ? "Anyone with the link can view" : "View link turned off"); NS.share = cur.id; route(); }).catch(function (e) { box.checked = !on; box.disabled = false; $("#shMsg").textContent = e.message; });
+  };
+  var ndz = $(".nd");
+  bindAttach(ndz, function () { return cur; }, function (m, html) { var el = $("#ndDrop [data-upmsg]"); if (el) { if (html) el.innerHTML = m; else el.textContent = m; } }, function () { var l = $("#ndAttList"); if (l) l.innerHTML = attListHTML(cur); });
+  bindTagEditor($("#ndTags .tagbox"), function () { return cur; }, function () { route(); setTimeout(function () { var i = $("#ndTags .taginput"); if (i) i.focus(); }, 0); });
+  $("#ndLinks").onclick = function (e) { var b = e.target.closest("[data-unlink]"); if (b) { e.preventDefault(); unlink(cur, b.getAttribute("data-unlink")); route(); toast("Link removed"); } };
+  function noteSel() { var sl = window.getSelection(); if (!sl || sl.isCollapsed) return ""; var a = sl.anchorNode && (sl.anchorNode.nodeType === 3 ? sl.anchorNode.parentNode : sl.anchorNode); return a && a.closest && a.closest("[data-sel]") ? sl.toString().trim() : ""; }
+  function noteLinkMenu(x, y) {
+    var t = noteSel(); if (!t) { toast("Select a word or sentence in the full text first."); return; }
+    openLinkMenu({ x: x, y: y, text: t, note: function () { return cur; }, onDone: route });
+  }
+  $$("[data-sel]").forEach(function (p) { p.addEventListener("contextmenu", function (e) { if (!noteSel()) return; e.preventDefault(); noteLinkMenu(e.clientX, e.clientY); }); });
+  var nk = function (e) {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "k" && noteSel()) {
+      e.preventDefault(); var r = window.getSelection().getRangeAt(0).getBoundingClientRect(); noteLinkMenu(r.left, r.bottom + 8);
+    }
+  };
+  document.addEventListener("keydown", nk); cleanup.push(function () { document.removeEventListener("keydown", nk); });
   $(".nd").onclick = function (e) {
     var rv = e.target.closest("[data-reveal]");
     if (rv) { var row = rv.closest(".np-row"); $$(".nm-right,.nm-fixes", row).forEach(function (x) { x.hidden = false; }); rv.remove(); return; }
@@ -1353,6 +1709,24 @@ VIEWS.notes = function (m, id) {
     if (a === "hide") { NS.hide = !NS.hide; route(); }
     if (a === "del") $("#ndConf").hidden = false;
     if (a === "delN") $("#ndConf").hidden = true;
+    if (a === "share") { NS.share = NS.share === cur.id ? "" : cur.id; $("#ndShare").hidden = NS.share !== cur.id; }
+    if (a === "shSys") navigator.share({ title: cur.title, text: shareText(cur, false) }).catch(function () {});
+    if (a === "shCopy") copyText(shareText(cur, false));
+    if (a === "shCopy2") copyText(shareText(cur, true));
+    if (a === "shLinkCopy") copyText(cur.docLink);
+    if (a === "shDoc") {
+      if (!online()) { toast("You're offline. Try again when connected."); return; }
+      b.disabled = true; b.textContent = cur.docId ? "Updating…" : "Saving…";
+      saveNoteDoc(cur).then(function () { toast("Saved to Google Docs"); NS.share = cur.id; route(); }).catch(function (e2) { $("#shMsg").textContent = e2.message; b.disabled = false; b.textContent = cur.docId ? "Update the Doc" : "Save as Google Doc"; });
+    }
+    if (a === "attRm") { var row = b.closest(".att"); b.hidden = true; $("[data-attc]", row).hidden = false; }
+    if (a === "attRmN" || a === "attRmT") {
+      var aid = b.closest(".att").getAttribute("data-att");
+      cur.attachments = (cur.attachments || []).filter(function (x) { return x.id !== aid; }); cur.u = Date.now(); save();
+      if (a === "attRmT") trashDrive(aid).then(function () { toast("Moved to Google Drive trash"); }).catch(function (e3) { toast(e3.message); });
+      else toast("Removed from this note");
+      $("#ndAttList").innerHTML = attListHTML(cur);
+    }
     if (a === "merge") {
       var oid = $("#ndMerge").value; if (!oid) { toast("Choose a note to merge first."); return; }
       var other = S.notes.filter(function (x) { return x.id === oid; })[0];
