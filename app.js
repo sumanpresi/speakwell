@@ -19,6 +19,7 @@ var I = {
   chart: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>',
   ok: '<path d="M5 12l5 5 9-10"/>',
   brain: '<path d="M9 4a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 002 5 3 3 0 006 1V5a3 3 0 00-3-1z"/><path d="M15 4a3 3 0 013 3 3 3 0 012 5 3 3 0 01-2 5 3 3 0 01-6 1"/>',
+  note: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h5"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 011-1h10"/>'
 };
 function ico(n) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + I[n] + '</svg>'; }
@@ -490,10 +491,12 @@ function checkWriting(text) {
 /* ================= router / shell ================= */
 var NAV = [["home", "Home", "home"], ["learn", "Learn", "learn"], ["speak", "Speak", "speak"], ["write", "Write", "write"], ["coach", "Coach", "coach"]];
 function shell(active) {
-  var t = NAV.map(function (n) { return '<button class="tab" data-go="' + n[0] + '"' + (active === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + n[1] + "</button>"; }).join("");
+  var bottom = active === "notes" ? "write" : active;
+  var t = NAV.map(function (n) { return '<button class="tab" data-go="' + n[0] + '"' + (bottom === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + n[1] + "</button>"; }).join("");
   $("#tabs").innerHTML = t;
   $("#rail").innerHTML = '<div class="brand">' + logo() + '<b>Speakwell</b></div>' +
     NAV.map(function (n) { return '<button data-go="' + n[0] + '"' + (active === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + n[1] + "</button>"; }).join("") +
+    '<button data-go="notes"' + (active === "notes" ? ' aria-current="page"' : "") + ">" + ico("note") + 'My notes' + (S.notes.length ? '<span class="rail-count">' + S.notes.length + "</span>" : "") + "</button>" +
     '<button data-go="progress"' + (active === "progress" ? ' aria-current="page"' : "") + ">" + ico("chart") + 'Progress</button><div class="spacer"></div>' +
     '<button data-go="settings"' + (active === "settings" ? ' aria-current="page"' : "") + ">" + ico("gear") + "Settings</button>";
 }
@@ -524,7 +527,7 @@ function route() {
   var h = (location.hash || "#home").slice(1);
   var parts = h.split("~"), v = parts[0], arg = parts[1];
   var m = $("#main");
-  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress", notes: "write", note: "write" }[v] || "home";
+  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress", notes: "notes", note: "notes" }[v] || "home";
   shell(tab);
   var fn = VIEWS[v] || VIEWS.home;
   m.innerHTML = "";
@@ -544,7 +547,7 @@ VIEWS.home = function (m) {
   m.innerHTML = top("Speakwell", { noGear: false }) +
     '<div class="hero"><div class="hello stack"><h1>Hello, <span>' + name + "</span>.</h1>" +
     '<p class="muted">Speak clearly at work, with friends, and on stage. Ten focused minutes a day is enough.</p>' +
-    '<div class="stats"><div class="stat"><b>' + S.streak + '</b><span>Day streak</span></div><div class="stat"><b>' + S.xp + '</b><span>XP</span></div><div class="stat"><b>' + lessonsDone + "/" + SW.lessons.length + '</b><span>Lessons</span></div></div></div>' +
+    '<div class="stats"><div class="stat"><b>' + S.streak + '</b><span>Day streak</span></div><div class="stat"><b>' + S.xp + '</b><span>XP</span></div><div class="stat"><b>' + lessonsDone + "/" + SW.lessons.length + '</b><span>Lessons</span></div></div>' + resumeHTML() + '</div>' +
     '<div class="card lift plan"><div class="eyebrow">Today\'s plan</div>' +
     '<button class="listrow" data-go="lesson~' + todo.id + '"><span class="num">1</span><span class="grow"><span class="t">' + esc(todo.title) + '</span><br><span class="d">Lesson · 4 min</span></span></button>' +
     '<button class="listrow" data-go="scene~' + sc.id + '"><span class="num">2</span><span class="grow"><span class="t">' + esc(sc.title) + '</span><br><span class="d">Speaking scenario · 5 min</span></span></button>' +
@@ -569,13 +572,21 @@ VIEWS.home = function (m) {
     (S.name ? "" : '<div class="section card"><label class="f" for="nm">What should I call you?<input id="nm" type="text" placeholder="Your first name" autocomplete="given-name"></label><div class="row" style="margin-top:10px"><button class="btn primary" id="nmSave">Save</button></div></div>');
   var b = $("#nmSave"); if (b) b.onclick = function () { S.name = $("#nm").value.trim(); save(); route(); };
 };
+function resumeHTML() {
+  var items = [], last = S.notes.slice().sort(function (a, b) { return b.u - a.u; })[0], ses = S.sessions[S.sessions.length - 1];
+  if (S.draft && S.draft.trim()) items.push(tile("write", "Continue writing", esc(S.draft.replace(/\s+/g, " ").slice(0, 110))));
+  if (last) items.push(tile("note~" + last.id, "Revise: " + esc(last.title), sentencePairs(last.orig, last.fixed).filter(function (x) { return x.changed; }).length + " sentences to review · " + relDate(last.u)));
+  if (ses) items.push(tile("progress", "Last speaking score: " + ses.score, (ses.wpm ? ses.wpm + " words/min · " : "") + ses.fillers + " filler words"));
+  if (!items.length) return "";
+  return '<div class="stack" style="gap:8px"><span class="eyebrow">Pick up where you left off</span><div class="resume">' + items.join("") + "</div></div>";
+}
 function tile(go, t, d) { return '<button class="tile" data-go="' + go + '"><span class="t">' + t + '</span><span class="d">' + d + "</span></button>"; }
 
 /* ---------- Learn ---------- */
 VIEWS.learn = function (m) {
   var html = top("Grammar library", { eyebrow: "Learn" }) +
     '<div class="row"><button class="btn primary" data-go="quiz">' + ico("spark") + 'Mixed quiz</button><button class="btn" data-go="builder">Sentence builder</button><button class="btn" data-go="words">Confused words</button></div>' +
-    '<label class="f" style="margin-top:16px" for="lq"><span class="eyebrow">Search lessons</span><input id="lq" type="search" placeholder="e.g. comma, tense, articles"></label>';
+    '<label class="f" style="margin-top:16px" for="lq"><span class="eyebrow">Search lessons</span><input id="lq" type="search" placeholder="e.g. comma, tense, articles"></label><div class="cols">';
   SW.lessonGroups.forEach(function (g) {
     var ls = SW.lessons.filter(function (l) { return l.group === g.id; });
     var dn = ls.filter(function (l) { return S.done[l.id]; }).length;
@@ -584,7 +595,7 @@ VIEWS.learn = function (m) {
         return '<button class="listrow" data-go="lesson~' + l.id + '" data-q="' + esc((l.title + " " + l.summary).toLowerCase()) + '"><span class="check' + (S.done[l.id] ? " on" : "") + '">' + (S.done[l.id] ? ico("ok") : "") + '</span><span class="grow"><span class="t">' + esc(l.title) + '</span><br><span class="d">' + esc(l.summary) + "</span></span></button>";
       }).join("") + "</div></div>";
   });
-  m.innerHTML = html;
+  m.innerHTML = html + "</div>";
   $("#lq").oninput = function () {
     var q = this.value.toLowerCase().trim();
     $$("[data-q]").forEach(function (r) { r.hidden = q && r.getAttribute("data-q").indexOf(q) < 0; });
@@ -598,7 +609,7 @@ VIEWS.lesson = function (m, id) {
   var g = SW.lessonGroups.filter(function (x) { return x.id === l.group; })[0];
   var idx = SW.lessons.indexOf(l), next = SW.lessons[idx + 1];
   var html = top(esc(l.title), { back: "learn", eyebrow: g.name }) +
-    '<div class="stack"><p style="font-size:1.08rem">' + l.summary + "</p>" +
+    '<div class="split"><div class="col-main"><p style="font-size:1.08rem">' + l.summary + "</p>" +
     '<div class="card"><ul class="points">' + l.points.map(function (p) { return "<li>" + p + "</li>"; }).join("") + "</ul></div>";
   if (l.examples && l.examples.length) {
     html += '<div class="section"><h2>Examples</h2>' + l.examples.map(function (e) {
@@ -606,11 +617,11 @@ VIEWS.lesson = function (m, id) {
     }).join("") + "</div>";
   }
   if (l.builder) html += '<div class="section"><h2>Build your own sentence</h2><div id="bld"></div></div>';
-  html += '<div class="section"><h2>Check yourself</h2><div id="lq" class="stack"></div></div>' +
+  html += '</div><div class="col-side"><div class="section"><h2>Check yourself</h2><div id="lq" class="stack"></div></div>' +
     '<div class="section card"><h3>Ask the coach about this topic</h3><p class="muted small">Get more examples, or check your own sentence.</p>' +
     '<textarea id="askT" rows="2" placeholder="e.g. Give me 5 more examples, or: Is this correct: &quot;I am working here since 2020&quot;?"></textarea>' +
     '<div class="row" style="margin-top:8px"><button class="btn" id="askB">' + ico("spark") + 'Ask</button></div><div id="askO" class="ai-out" style="margin-top:10px"></div></div>' +
-    '<div class="row" style="margin-top:22px"><button class="btn primary" id="doneB">' + (S.done[l.id] ? "Completed ✓" : "Mark as complete") + "</button>" + (next ? '<button class="btn" data-go="lesson~' + next.id + '">Next: ' + esc(next.title) + "</button>" : "") + "</div></div>";
+    '<div class="row" style="margin-top:22px"><button class="btn primary" id="doneB">' + (S.done[l.id] ? "Completed ✓" : "Mark as complete") + "</button>" + (next ? '<button class="btn" data-go="lesson~' + next.id + '">Next: ' + esc(next.title) + "</button>" : "") + "</div></div></div>";
   m.innerHTML = html;
   if (l.builder) builder($("#bld"));
   renderQuiz($("#lq"), l.quiz, false);
@@ -727,7 +738,7 @@ VIEWS.words = function (m) {
 /* ---------- Speak hub ---------- */
 VIEWS.speak = function (m) {
   var html = top("Speaking", { eyebrow: "Practise out loud" }) +
-    '<div class="grid">' + tile("impromptu", "Impromptu trainer", "Random topic → think 15 s → speak 60 s → feedback.") + tile("think", "Thinking frameworks", "PREP, STAR, SCQA and more: structure before words.") + tile("drills", "Brain drills", "Rapid categories, describe-it, because-chains.") + tile("coach", "Role-play with AI", "Talk through any situation, live.") + "</div>";
+    '<div class="grid">' + tile("impromptu", "Impromptu trainer", "Random topic → think 15 s → speak 60 s → feedback.") + tile("think", "Thinking frameworks", "PREP, STAR, SCQA and more: structure before words.") + tile("drills", "Brain drills", "Rapid categories, describe-it, because-chains.") + tile("coach", "Role-play with AI", "Talk through any situation, live.") + '</div><div class="cols">';
   SW.scenarioGroups.forEach(function (g) {
     var ss = SW.scenarios.filter(function (s) { return s.group === g.id; });
     html += '<div class="section"><h2>' + g.name + '</h2><div class="card">' + ss.map(function (s) {
@@ -735,7 +746,7 @@ VIEWS.speak = function (m) {
       return '<button class="listrow" data-go="scene~' + s.id + '"><span class="grow"><span class="t">' + esc(s.title) + '</span><br><span class="d">' + esc(s.goal) + "</span></span>" + (n ? '<span class="pill ok">' + n + "×</span>" : "") + "</button>";
     }).join("") + "</div></div>";
   });
-  m.innerHTML = html;
+  m.innerHTML = html + "</div>";
 };
 
 VIEWS.scene = function (m, id) {
@@ -744,13 +755,13 @@ VIEWS.scene = function (m, id) {
   var fw = SW.frameworks.filter(function (f) { return f.id === s.framework; })[0];
   var g = SW.scenarioGroups.filter(function (x) { return x.id === s.group; })[0];
   m.innerHTML = top(esc(s.title), { back: "speak", eyebrow: g.name }) +
-    '<div class="stack"><p style="font-size:1.08rem">' + esc(s.goal) + "</p>" +
+    '<div class="split"><div class="col-main"><p style="font-size:1.08rem">' + esc(s.goal) + "</p>" +
     '<div class="card"><h3 style="margin-bottom:10px">How to do it</h3><ol class="steps">' + s.steps.map(function (x) { return "<li><span>" + esc(x) + "</span></li>"; }).join("") + "</ol></div>" +
     '<div class="card"><div class="row" style="justify-content:space-between"><h3>Structure: ' + fw.name + '</h3><span class="muted small">' + esc(fw.use) + '</span></div><div class="fw" style="margin-top:10px">' + fw.steps.map(function (x) { return "<div><b>" + x[0] + "</b><small>" + esc(x[1]) + "</small></div>"; }).join("") + "</div></div>" +
     '<div class="card"><h3>Phrase bank</h3><p class="muted small">Tap to hear. Say each one aloud three times until it feels automatic.</p>' + s.phrases.map(function (p) { return '<div class="phrase"><p>' + esc(p) + '</p><button class="icon-btn" aria-label="Listen" data-say="' + esc(p) + '">' + ico("play") + "</button></div>"; }).join("") + "</div>" +
     '<div class="card"><h3>Tips</h3><ul class="points" style="margin-top:8px">' + s.tips.map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") + "</ul></div>" +
-    '<div class="section"><div class="head"><h2>Your turn</h2><button class="btn primary sm" data-go="coach~' + s.id + '">' + ico("coach") + "Role-play this</button></div>" +
-    '<p class="muted small">Prompt: ' + esc(s.script[0]) + "</p><div id='rec'></div></div></div>";
+    '</div><div class="col-side stick"><div class="section"><div class="head"><h2>Your turn</h2><button class="btn primary sm" data-go="coach~' + s.id + '">' + ico("coach") + "Role-play this</button></div>" +
+    '<p class="muted small">Prompt: ' + esc(s.script[0]) + "</p><div id='rec'></div></div></div></div>";
   recorder($("#rec"), { prompt: s.title + ". The listener says: " + s.script[0], target: 90, framework: fw, scene: s.id });
 };
 
@@ -883,15 +894,15 @@ VIEWS.write = function (m) {
   var draft = S.draft || "", dT = null;
   m.innerHTML = top("Writing studio", { eyebrow: "Write" }) +
     '<div class="row"><button class="btn" data-go="notes">My notes' + (S.notes.length ? " (" + S.notes.length + ")" : "") + '</button><button class="btn" data-go="words">Confused words</button><a class="btn" href="#guides">Writing guides</a></div>' +
-    '<div class="section card stack"><div class="row" style="justify-content:space-between"><h2>Draft</h2><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div>" +
+    '<div class="split"><div class="col-main"><div class="section card stack"><div class="row" style="justify-content:space-between"><h2>Draft</h2><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div>" +
     '<textarea id="ed" class="editor" rows="10" placeholder="Write or paste your email, message, speech or paragraph here.">' + esc(draft) + "</textarea>" +
     '<div class="selbar" id="selbar" hidden><span class="muted small">Selected</span><span class="selq" id="selq"></span><button class="btn primary sm" id="selGo">' + ico("spark") + 'Analyse</button></div>' +
     '<div class="row"><button class="btn" id="chk" title="Instant grammar and style check. Works offline.">' + ico("ok") + 'Quick check</button><button class="btn" id="anB" title="Select a sentence, or place the cursor in one">' + ico("spark") + 'Analyse sentence</button><button class="btn" id="cpy">' + ico("copy") + 'Copy</button><button class="btn" data-say-ed>' + ico("play") + 'Read aloud</button><button class="btn" id="noteB">Save as note</button></div></div>' +
-    '<div id="anMount"></div><div id="chkOut"></div>' +
+    '<div id="anMount"></div><div id="chkOut"></div></div><div class="col-side">' +
     '<div class="section card stack"><h2>AI rewrite</h2><p class="muted small">Pick what you want. Your draft stays as it is; the result appears below.</p><div class="row" id="aiOps">' +
     [["fix", "Fix grammar & explain"], ["formal", "More formal"], ["friendly", "More friendly"], ["short", "Shorter"], ["confident", "More confident"], ["speech", "Turn into a speech"]].map(function (o) { return '<button class="chip" data-op="' + o[0] + '">' + o[1] + "</button>"; }).join("") +
     '</div><div id="aiW" class="ai-out"></div></div>' +
-    '<div class="section" id="guides"><h2>Writing guides</h2><div class="grid">' + SW.guides.map(function (g) { return '<button class="tile" data-go="guide~' + g.id + '"><span class="eyebrow">' + esc(g.kind) + '</span><span class="t">' + esc(g.title) + "</span></button>"; }).join("") + "</div></div>";
+    '<div class="section" id="guides"><h2>Writing guides</h2><div class="card guide-list">' + SW.guides.map(function (g) { return '<button class="listrow" data-go="guide~' + g.id + '"><span class="grow"><span class="t">' + esc(g.title) + '</span><br><span class="d">' + esc(g.kind) + "</span></span></button>"; }).join("") + "</div></div></div></div>";
   var ed = $("#ed");
   ed.oninput = function () { clearTimeout(dT); dT = setTimeout(function () { S.draft = ed.value; S.draftT = Date.now(); save(); }, 800); };
   /* remember the text as you wrote it, before any AI fix, so a note can show both versions */
