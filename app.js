@@ -28,6 +28,7 @@ var I = {
   chev: '<path d="M6 9l6 6 6-6"/>',
   more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
   studio: '<path d="M4 5h11v9H8l-4 3z"/><path d="M15 9h5v9l-3-2h-6v-2"/><path d="M7 9h5"/>',
+  sketch: '<path d="M5 3h11l3 3v15H5z"/><path d="M9 14l6-6 2 2-6 6H9z"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 011-1h10"/>'
 };
 function ico(n) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + I[n] + '</svg>'; }
@@ -343,6 +344,7 @@ function merge(a, b) {
   (a.notes || []).concat(b.notes || []).forEach(function (n) { if (n.t <= R || out.notesDel[n.id]) return; nm[n.id] = nm[n.id] ? mergeNoteFields(nm[n.id], n) : n; });
   out.notes = Object.keys(nm).map(function (k) { return nm[k]; }).sort(function (p, q) { return p.t - q.t; }).slice(-500);
   out.guide = mergeGuide(a.guide, b.guide);
+  out.sketch = mergeSketch(a.sketch, b.sketch);
   out.analyses = Object.assign({}, a.analyses || {});
   Object.keys(b.analyses || {}).forEach(function (k) { if (!out.analyses[k] || out.analyses[k].t < b.analyses[k].t) out.analyses[k] = b.analyses[k]; });
   var newer = (b.updatedAt || 0) > (a.updatedAt || 0) ? b : a;
@@ -381,6 +383,31 @@ function mergeGuide(a, b) {
     ratings: Object.keys(N.ratings || {}).length ? N.ratings : (O.ratings || {}), reflection: N.reflection || O.reflection || "" };
   return { data: d, raw: "", t: Math.max(a.t || 0, b.t || 0) };
 }
+/* ---- Sentence Sketchbook: list of remembered topics, synced per topic ---- */
+var SKETCH_KEY = "sentence-sketchbook-learned";
+function sketchLocal() { try { return JSON.parse(localStorage.getItem(SKETCH_KEY) || "[]") || []; } catch (e) { return []; } }
+function sketchOn() { var out = []; Object.keys((S.sketch && S.sketch.items) || {}).forEach(function (k) { if (S.sketch.items[k].on) out.push(k); }); return out.sort(); }
+function sketchCapture(list) {
+  S.sketch = S.sketch || { items: {} };
+  var now = Date.now(), set = {}, changed = false;
+  (list || []).forEach(function (k) { set[k] = 1; });
+  Object.keys(set).forEach(function (k) { var it = S.sketch.items[k]; if (!it || !it.on) { S.sketch.items[k] = { on: true, t: now }; changed = true; } });
+  Object.keys(S.sketch.items).forEach(function (k) { if (S.sketch.items[k].on && !set[k]) { S.sketch.items[k] = { on: false, t: now }; changed = true; } });
+  if (changed) save();
+  return changed;
+}
+function sketchWriteLocal() {
+  var want = sketchOn(), have = sketchLocal().slice().sort();
+  if (JSON.stringify(want) === JSON.stringify(have)) return false;
+  try { localStorage.setItem(SKETCH_KEY, JSON.stringify(want)); } catch (e) { return false; }
+  return true;
+}
+function mergeSketch(a, b) {
+  if (!a || !a.items) return b || null; if (!b || !b.items) return a;
+  var out = { items: {} };
+  [a.items, b.items].forEach(function (src) { Object.keys(src).forEach(function (k) { if (!out.items[k] || (out.items[k].t || 0) < (src[k].t || 0)) out.items[k] = src[k]; }); });
+  return out;
+}
 /* Two copies of one note: text from the newer edit, every other field from whichever copy changed it last */
 var NOTE_FIELDS = { tagsT: ["tags"], linksT: ["links"], titleT: ["title", "titleSet"], attT: ["attachments", "folderId"], docT: ["docId", "docLink", "docPublic"], revT: ["revised", "lastRev"] };
 function mergeNoteFields(x, y) {
@@ -406,7 +433,7 @@ function syncNow(interactive) {
       return dread(f.id).catch(function (e) { if (e.status === 404) { M.fileId = ""; return dfind(FILE_NAME).then(function (g) { if (!g) return null; M.fileId = g.id; return dread(g.id); }); } throw e; });
     });
   }).then(function (remote) {
-    if (remote && remote.app === "speakwell" && remote.data) { S = merge(S, remote.data); applyTheme(); if (guideWriteLocal()) refreshGuideFrame(); }
+    if (remote && remote.app === "speakwell" && remote.data) { S = merge(S, remote.data); applyTheme(); var g1 = guideWriteLocal(), s1 = sketchWriteLocal(); if (S.sketch) S.sketch.pulled = false; if (g1 || s1) refreshGuideFrame(); }
     saveLocal();
     var payload = JSON.stringify({ app: "speakwell", v: 2, savedAt: Date.now(), data: forDrive(S) });
     return M.fileId ? dupdate(M.fileId, payload) : dcreate(payload).then(function (id) { M.fileId = id; });
@@ -579,7 +606,7 @@ function shell(active) {
   var bottom = active === "notes" ? "write" : active;
   var t = NAV.map(function (n) { return '<button class="tab" data-go="' + n[0] + '"' + (bottom === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + n[1] + "</button>"; }).join("");
   $("#tabs").innerHTML = t;
-  var navItems = NAV.slice(0, 5).concat([["studio", "Spoken English", "studio"], ["progress", "Progress", "chart"]]);
+  var navItems = NAV.slice(0, 5).concat([["studio", "Spoken English", "studio"], ["sketch", "Sentence Sketchbook", "sketch"], ["progress", "Progress", "chart"]]);
   var tg = {}; S.notes.forEach(function (n) { (n.tags || []).forEach(function (x) { tg[x] = (tg[x] || 0) + 1; }); });
   var tags = Object.keys(tg).sort();
   var acct = railStatus();
@@ -663,7 +690,7 @@ function route() {
   var h = (location.hash || "#home").slice(1);
   var parts = h.split("~"), v = parts[0], arg = parts[1];
   var m = $("#main");
-  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress", notes: "notes", note: "notes", studio: "studio" }[v] || "home";
+  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress", notes: "notes", note: "notes", studio: "studio", sketch: "sketch" }[v] || "home";
   shell(tab);
   var fn = VIEWS[v] || VIEWS.home;
   m.innerHTML = "";
@@ -694,6 +721,7 @@ VIEWS.home = function (m) {
 
     '<div class="section"><h2>Practise</h2><div class="grid">' +
     tile("studio", "Spoken English guide", "Interactive daily routine and phrase bank for spoken English.") +
+    tile("sketch", "Sentence Sketchbook", "Hand-drawn grammar cards, sentence builder and quick checks.") +
     tile("speak", "Speaking scenarios", "Presentations, meetings, office talk, friends, interviews, calls.") +
     tile("impromptu", "Impromptu trainer", "Random topic, a framework, a timer, instant feedback.") +
     tile("drills", "Brain drills", "Fast-thinking games for fluency and word recall.") +
@@ -723,7 +751,7 @@ function tile(go, t, d) { return '<button class="tile" data-go="' + go + '"><spa
 /* ---------- Learn ---------- */
 VIEWS.learn = function (m) {
   var html = top("Grammar library", { eyebrow: "Learn" }) +
-    '<div class="row"><button class="btn primary" data-go="quiz">' + ico("spark") + 'Mixed quiz</button><button class="btn" data-go="builder">Sentence builder</button><button class="btn" data-go="words">Confused words</button></div>' +
+    '<div class="row"><button class="btn primary" data-go="quiz">' + ico("spark") + 'Mixed quiz</button><button class="btn" data-go="sketch">Sentence Sketchbook</button><button class="btn" data-go="builder">Sentence builder</button><button class="btn" data-go="words">Confused words</button></div>' +
     '<label class="f" style="margin-top:16px" for="lq"><span class="eyebrow">Search lessons</span><input id="lq" type="search" placeholder="e.g. comma, tense, articles"></label><div class="cols">';
   SW.lessonGroups.forEach(function (g) {
     var ls = SW.lessons.filter(function (l) { return l.group === g.id; });
@@ -1892,13 +1920,15 @@ VIEWS.notes = function (m, id) {
 };
 VIEWS.note = VIEWS.notes;
 
-/* ---------- Spoken English interactive guide ---------- */
-VIEWS.studio = function (m) {
-  m.innerHTML = top("Spoken English", { eyebrow: "Interactive guide" }) +
-    '<div class="row tight" style="margin:-4px 0 10px"><span class="muted small">Daily routine, phrase bank and your progress. Your ticks are saved on this device.</span><a class="btn sm" href="spoken-english.html" target="_blank" rel="noopener">Open full screen ↗</a></div>' +
-    '<div class="studio-wrap"><iframe class="studio-frame" src="spoken-english.html" title="Spoken English interactive guide" loading="eager"></iframe></div>';
+/* ---------- Embedded interactive guides ---------- */
+function embedView(m, file, title, eyebrow, desc, bg) {
+  m.innerHTML = top(title, { eyebrow: eyebrow }) +
+    '<div class="row tight" style="margin:-4px 0 10px"><span class="muted small">' + desc + (M.on ? " Progress syncs with Google Drive." : "") + '</span><a class="btn sm" href="' + file + '" target="_blank" rel="noopener">Open full screen ↗</a></div>' +
+    '<div class="studio-wrap" style="background:' + bg + '"><iframe class="studio-frame" src="' + file + '" title="' + esc(title) + '" loading="eager"></iframe></div>';
   m.classList.add("wide-main"); cleanup.push(function () { m.classList.remove("wide-main"); });
-};
+}
+VIEWS.studio = function (m) { embedView(m, "spoken-english.html", "Spoken English", "Interactive guide", "Daily routine, phrase bank and your progress.", "#fbf7ee"); };
+VIEWS.sketch = function (m) { embedView(m, "sentence-sketchbook.html", "Sentence Sketchbook", "Visual grammar", "Grammar sketch cards, sentence builder and speaking practice.", "#f8f0de"); };
 
 /* ---------- Correction history ---------- */
 var HKINDS = [["all", "All"], ["writing", "Writing"], ["speaking", "Speaking"], ["coach", "Coach"], ["grammar", "Grammar"], ["quiz", "Quiz"]];
@@ -2033,7 +2063,12 @@ function refreshGuideFrame() {
   var f = $(".studio-frame"); if (!f || document.activeElement === f) return;
   try { f.contentWindow.location.reload(); } catch (e) {}
 }
-window.addEventListener("storage", function (e) { if (e.key === GUIDE_KEY && e.newValue) guideCapture(e.newValue); });
+window.addEventListener("storage", function (e) {
+  if (e.key === GUIDE_KEY && e.newValue) guideCapture(e.newValue);
+  if (e.key === SKETCH_KEY) { var l = []; try { l = JSON.parse(e.newValue || "[]") || []; } catch (x) {} sketchCapture(l); }
+});
+/* sketchbook: first run uploads what this device already has; later, changes made while Speakwell was closed are picked up */
+(function () { var local = sketchLocal(); if (!S.sketch) { if (local.length) sketchCapture(local); } else if (JSON.stringify(local.slice().sort()) !== JSON.stringify(sketchOn())) { if (S.sketch.pulled) sketchWriteLocal(); else sketchCapture(local); } })();
 (function () { var raw = guideLocalRaw(); if (raw && (!S.guide || S.guide.raw !== raw)) { if (S.guide && S.guide.data && !S.guide.raw) guideWriteLocal(); else guideCapture(raw); } else if (!raw && S.guide && S.guide.data) guideWriteLocal(); })();
 /* ================= boot ================= */
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
