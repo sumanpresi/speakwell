@@ -1185,6 +1185,50 @@ function revertFixes(text, fixes) {
   return { text: text, ok: ok };
 }
 /* Keep the draft's note in step with the draft */
+/* Merge note `small` into note `big` (same draft). Keeps every fix and restores the writer's own wording. */
+function nrm(x) { return String(x || "").replace(/\s+/g, " ").trim(); }
+function mergeNotes(big, small) {
+  if (big === small) return big;
+  var bo = big.orig, bf = big.fixed;
+  if (nrm(bf).indexOf(nrm(small.fixed)) > -1 || nrm(bf).indexOf(nrm(small.orig)) > -1) {
+    /* the small note is part of this draft: put its uncorrected wording back into "your version" */
+    if (nrm(small.orig) !== nrm(small.fixed) && nrm(bo).indexOf(nrm(small.fixed)) > -1 && nrm(bo).indexOf(nrm(small.orig)) < 0) {
+      var at = bo.indexOf(small.fixed);
+      if (at > -1) bo = bo.slice(0, at) + small.orig + bo.slice(at + small.fixed.length);
+      else bo = nrm(bo).replace(nrm(small.fixed), nrm(small.orig));
+    }
+  } else {
+    /* different text: append it */
+    bo = bo + "\n\n" + small.orig; bf = bf + "\n\n" + small.fixed;
+  }
+  var seen = {}, fixes = [];
+  (big.fixes || []).concat(small.fixes || []).forEach(function (f) { var k = (f.from || "") + "|" + (f.to || "") + "|" + (f.why || ""); if (!seen[k]) { seen[k] = 1; fixes.push(f); } });
+  big.orig = bo; big.fixed = bf; big.fixes = fixes; big.t = Math.min(big.t, small.t); big.u = Date.now();
+  big.revised = Math.max(big.revised || 0, small.revised || 0); big.lastRev = Math.max(big.lastRev || 0, small.lastRev || 0);
+  big.pending = !!(big.pending && small.pending);
+  if (!big.titleSet) big.title = noteTitle(big.fixed);
+  S.notes = S.notes.filter(function (x) { return x.id !== small.id; }); S.notesDel[small.id] = Date.now();
+  if (S.wip && S.wip.noteId === small.id) S.wip.noteId = big.id;
+  return big;
+}
+/* Notes whose text sits inside another note's draft belong to that draft */
+function autoMergeNotes() {
+  var changed = false, again = true;
+  while (again) {
+    again = false;
+    var list = S.notes.slice().sort(function (a, b) { return nrm(b.fixed).length - nrm(a.fixed).length; });
+    outer: for (var i = 0; i < list.length; i++) for (var j = i + 1; j < list.length; j++) {
+      var big = list[i], sm = list[j], sf = nrm(sm.fixed), so = nrm(sm.orig);
+      if (sf.length < 15) continue;
+      if (nrm(big.fixed).indexOf(sf) > -1 || nrm(big.orig).indexOf(so) > -1 || nrm(big.fixed).indexOf(so) > -1 || nrm(big.orig).indexOf(sf) > -1) {
+        mergeNotes(big, sm); changed = again = true; break outer;
+      }
+    }
+  }
+  if (changed) save();
+  return changed;
+}
+
 function syncDraftNote(cur, quiet) {
   var w = S.wip; if (!w || !w.fixes || !w.fixes.length) return null;
   var existing = w.noteId && S.notes.filter(function (x) { return x.id === w.noteId; })[0];
@@ -1192,6 +1236,7 @@ function syncDraftNote(cur, quiet) {
   var orig = rv.ok || !existing ? rv.text : existing.orig;
   var note = saveNote({ id: existing ? existing.id : null, orig: orig.trim(), fixed: cur.trim(), fixes: w.fixes.slice(), source: "Writing studio", pending: false }, quiet);
   w.noteId = note.id; save();
+  if (autoMergeNotes()) { note = S.notes.filter(function (x) { return x.id === w.noteId; })[0] || note; }
   return note;
 }
 function correctWithAI(text) {
@@ -1207,6 +1252,7 @@ function wordCount(s) { return (String(s).match(/\S+/g) || []).length; }
 
 var NS = { q: "", only: "all", hide: false, changedOnly: true };
 VIEWS.notes = function (m, id) {
+  if (autoMergeNotes()) toast("Notes from the same draft were combined");
   var wide = window.matchMedia("(min-width: 900px)").matches;
   var all = S.notes.slice().sort(function (a, b) { return b.u - a.u; });
   var cur = id && S.notes.filter(function (x) { return x.id === id; })[0];
@@ -1248,6 +1294,7 @@ VIEWS.notes = function (m, id) {
       '<div class="row tight"><button class="btn sm" data-a="say">' + ico("play") + 'Hear correct</button><button class="btn sm" data-a="rev">' + ico("ok") + 'Revised</button><button class="btn sm" data-a="edit">Open in studio</button>' +
       (n.pending ? '<button class="btn sm primary" data-a="ai">Correct with AI</button>' : "") + '<button class="btn sm ghost" data-a="del" style="color:var(--bad)">Delete</button>' +
       '<span class="row tight" id="ndConf" hidden><span class="small">Delete this note?</span><button class="btn sm" data-a="delY" style="color:var(--bad)">Yes</button><button class="btn sm" data-a="delN">No</button></span></div>' +
+      (S.notes.length > 1 ? '<div class="row tight"><label class="small muted" for="ndMerge">Merge another note into this one</label><select id="ndMerge" style="width:auto;min-width:0;flex:1;max-width:340px"><option value="">Choose a note…</option>' + S.notes.filter(function (x) { return x.id !== n.id; }).sort(function (a, b) { return b.u - a.u; }).map(function (x) { return '<option value="' + x.id + '">' + esc(x.title) + " · " + relDate(x.u) + "</option>"; }).join("") + '</select><button class="btn sm" data-a="merge">Merge</button></div>' : "") +
       '<div class="row tight"><button class="chip' + (NS.changedOnly ? " on" : "") + '" data-a="changed">Fixed sentences only</button><button class="chip' + (NS.hide ? " on" : "") + '" data-a="hide">Revision mode</button></div>' +
       (NS.hide ? '<div class="notice info">Corrections are hidden. Read your version, say the correct sentence aloud, then tap Reveal.</div>' : "") +
       '<div class="np">' + (rows || '<p class="muted">Nothing to show.</p>') + "</div>" +
@@ -1275,6 +1322,12 @@ VIEWS.notes = function (m, id) {
     if (a === "hide") { NS.hide = !NS.hide; route(); }
     if (a === "del") $("#ndConf").hidden = false;
     if (a === "delN") $("#ndConf").hidden = true;
+    if (a === "merge") {
+      var oid = $("#ndMerge").value; if (!oid) { toast("Choose a note to merge first."); return; }
+      var other = S.notes.filter(function (x) { return x.id === oid; })[0];
+      var keep = nrm(other.fixed).length > nrm(cur.fixed).length ? other : cur, drop = keep === cur ? other : cur;
+      mergeNotes(keep, drop); save(); toast("Notes merged"); go("note~" + keep.id);
+    }
     if (a === "delY") { S.notes = S.notes.filter(function (x) { return x.id !== cur.id; }); S.notesDel[cur.id] = Date.now(); if (S.wip && S.wip.noteId === cur.id) S.wip.noteId = ""; save(); toast("Note deleted"); go("notes"); }
     if (a === "ai") {
       b.disabled = true; b.textContent = "Correcting…";
