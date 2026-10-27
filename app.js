@@ -309,7 +309,7 @@ function dcreate(body) {
 function dupdate(id, body) { return gfetch(UAPI + "/" + id + "?uploadType=media", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: body }); }
 function dread(id) { return gfetch(DAPI + "/" + id + "?alt=media").then(function (r) { return r.json(); }); }
 
-function forDrive(s) { var c = JSON.parse(JSON.stringify(s)); if (!M.syncKey) c.settings.apiKey = ""; delete c.settings.voice; return c; }
+function forDrive(s) { var c = JSON.parse(JSON.stringify(s)); if (!M.syncKey) c.settings.apiKey = ""; delete c.settings.voice; if (c.guide) c.guide.raw = ""; return c; }
 function merge(a, b) {
   var R = Math.max(a.resetAt || 0, b.resetAt || 0), aOld = (a.resetAt || 0) < R, bOld = (b.resetAt || 0) < R;
   var H = Math.max(a.historyClearedAt || 0, b.historyClearedAt || 0, R);
@@ -342,6 +342,7 @@ function merge(a, b) {
   var nm = {};
   (a.notes || []).concat(b.notes || []).forEach(function (n) { if (n.t <= R || out.notesDel[n.id]) return; nm[n.id] = nm[n.id] ? mergeNoteFields(nm[n.id], n) : n; });
   out.notes = Object.keys(nm).map(function (k) { return nm[k]; }).sort(function (p, q) { return p.t - q.t; }).slice(-500);
+  out.guide = mergeGuide(a.guide, b.guide);
   out.analyses = Object.assign({}, a.analyses || {});
   Object.keys(b.analyses || {}).forEach(function (k) { if (!out.analyses[k] || out.analyses[k].t < b.analyses[k].t) out.analyses[k] = b.analyses[k]; });
   var newer = (b.updatedAt || 0) > (a.updatedAt || 0) ? b : a;
@@ -354,6 +355,31 @@ function merge(a, b) {
   out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
   recount(out);
   return out;
+}
+/* ---- Spoken English guide: its own localStorage record, synced through S.guide ---- */
+var GUIDE_KEY = "spoken-english-infographic-v1";
+function guideLocalRaw() { try { return localStorage.getItem(GUIDE_KEY) || ""; } catch (e) { return ""; } }
+function guideCapture(raw) {
+  if (!raw || (S.guide && S.guide.raw === raw)) return false;
+  var d = null; try { d = JSON.parse(raw); } catch (e) { return false; }
+  if (!d || typeof d !== "object") return false;
+  S.guide = { data: d, raw: raw, t: Date.now() }; save(); return true;
+}
+function guideWriteLocal() {
+  if (!S.guide || !S.guide.data) return false;
+  var raw = JSON.stringify(S.guide.data);
+  if (raw === guideLocalRaw()) { S.guide.raw = raw; return false; }
+  try { localStorage.setItem(GUIDE_KEY, raw); } catch (e) { return false; }
+  S.guide.raw = raw; return true;
+}
+function mergeGuide(a, b) {
+  if (!a || !a.data) return b || null; if (!b || !b.data) return a;
+  var newer = (b.t || 0) > (a.t || 0) ? b : a, older = newer === a ? b : a, N = newer.data, O = older.data;
+  var uni = function (x, y) { var m0 = {}; (x || []).concat(y || []).forEach(function (v) { m0[JSON.stringify(v)] = v; }); return Object.keys(m0).map(function (k) { return m0[k]; }); };
+  var checks = {}; Object.keys(O.checks || {}).forEach(function (k) { checks[k] = O.checks[k]; }); Object.keys(N.checks || {}).forEach(function (k) { checks[k] = N.checks[k]; });
+  var d = { completed: uni(N.completed, O.completed).sort(function (x, y) { return x - y; }), dates: uni(N.dates, O.dates).sort(), checks: checks,
+    ratings: Object.keys(N.ratings || {}).length ? N.ratings : (O.ratings || {}), reflection: N.reflection || O.reflection || "" };
+  return { data: d, raw: "", t: Math.max(a.t || 0, b.t || 0) };
 }
 /* Two copies of one note: text from the newer edit, every other field from whichever copy changed it last */
 var NOTE_FIELDS = { tagsT: ["tags"], linksT: ["links"], titleT: ["title", "titleSet"], attT: ["attachments", "folderId"], docT: ["docId", "docLink", "docPublic"], revT: ["revised", "lastRev"] };
@@ -380,7 +406,7 @@ function syncNow(interactive) {
       return dread(f.id).catch(function (e) { if (e.status === 404) { M.fileId = ""; return dfind(FILE_NAME).then(function (g) { if (!g) return null; M.fileId = g.id; return dread(g.id); }); } throw e; });
     });
   }).then(function (remote) {
-    if (remote && remote.app === "speakwell" && remote.data) { S = merge(S, remote.data); applyTheme(); }
+    if (remote && remote.app === "speakwell" && remote.data) { S = merge(S, remote.data); applyTheme(); if (guideWriteLocal()) refreshGuideFrame(); }
     saveLocal();
     var payload = JSON.stringify({ app: "speakwell", v: 2, savedAt: Date.now(), data: forDrive(S) });
     return M.fileId ? dupdate(M.fileId, payload) : dcreate(payload).then(function (id) { M.fileId = id; });
@@ -2003,6 +2029,12 @@ VIEWS.settings = function (m) {
 document.addEventListener("keydown", function (e) {
   if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "n") { e.preventDefault(); var nb = $("#newB"); if (nb) nb.click(); else { S.curNote = ""; S.draft = ""; S.draftT = Date.now(); save(); go("write"); } }
 });
+function refreshGuideFrame() {
+  var f = $(".studio-frame"); if (!f || document.activeElement === f) return;
+  try { f.contentWindow.location.reload(); } catch (e) {}
+}
+window.addEventListener("storage", function (e) { if (e.key === GUIDE_KEY && e.newValue) guideCapture(e.newValue); });
+(function () { var raw = guideLocalRaw(); if (raw && (!S.guide || S.guide.raw !== raw)) { if (S.guide && S.guide.data && !S.guide.raw) guideWriteLocal(); else guideCapture(raw); } else if (!raw && S.guide && S.guide.data) guideWriteLocal(); })();
 /* ================= boot ================= */
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
