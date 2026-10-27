@@ -30,7 +30,7 @@ var KEY = "speakwell.v1";
    - active days are a set, streak is computed from it
    - lessons, sessions, history and chats carry timestamps and are unioned */
 var defaults = {
-  name: "", done: {}, days: {}, counts: {}, sessions: [], history: [], chats: {}, chatsT: {}, draft: "", draftT: 0, analyses: {},
+  name: "", done: {}, days: {}, counts: {}, sessions: [], history: [], chats: {}, chatsT: {}, draft: "", draftT: 0, analyses: {}, notes: [], notesDel: {}, wip: { orig: "", fixes: [], t: 0 },
   resetAt: 0, historyClearedAt: 0, updatedAt: 0,
   xp: 0, streak: 0, writes: 0, quiz: { right: 0, total: 0 },
   settings: { apiKey: "", baseUrl: "https://api.openai.com/v1", model: "gpt-5.6-luna", transcribeModel: "gpt-4o-mini-transcribe",
@@ -327,6 +327,12 @@ function merge(a, b) {
     if (t > R || (!ta && !tb)) { out.chats[k] = (w.chats || {})[k] || []; out.chatsT[k] = t; }
   });
   if ((b.draftT || 0) > (a.draftT || 0)) { out.draft = b.draft; out.draftT = b.draftT; }
+  if ((b.draftT || 0) > (a.draftT || 0) && b.wip) out.wip = b.wip;
+  out.notesDel = Object.assign({}, a.notesDel || {});
+  Object.keys(b.notesDel || {}).forEach(function (k) { out.notesDel[k] = Math.max(out.notesDel[k] || 0, b.notesDel[k]); });
+  var nm = {};
+  (a.notes || []).concat(b.notes || []).forEach(function (n) { if (n.t <= R || out.notesDel[n.id]) return; if (!nm[n.id] || (nm[n.id].u || 0) < (n.u || 0)) nm[n.id] = n; });
+  out.notes = Object.keys(nm).map(function (k) { return nm[k]; }).sort(function (p, q) { return p.t - q.t; }).slice(-500);
   out.analyses = Object.assign({}, a.analyses || {});
   Object.keys(b.analyses || {}).forEach(function (k) { if (!out.analyses[k] || out.analyses[k].t < b.analyses[k].t) out.analyses[k] = b.analyses[k]; });
   var newer = (b.updatedAt || 0) > (a.updatedAt || 0) ? b : a;
@@ -390,7 +396,7 @@ function syncStateHTML() {
   if (!M.on) return '<p class="muted small">Not connected. Progress is saved on this device only.</p>';
   return '<p class="small"><b>Connected.</b> ' + (M.last ? "Last synced " + ago(M.last) + "." : "") + (M.hint ? " Account: " + esc(M.hint) + "." : "") + "</p>" + (M.err ? '<div class="notice">' + esc(M.err) + "</div>" : "");
 }
-var SAFE_VIEWS = ["home", "learn", "progress", "history", "speak", "settings", "write"];
+var SAFE_VIEWS = ["notes", "home", "learn", "progress", "history", "speak", "settings", "write"];
 function afterSync() { var v = (location.hash || "#home").slice(1).split("~")[0]; if (SAFE_VIEWS.indexOf(v) > -1 && !document.activeElement.matches("textarea,input")) route(); }
 document.addEventListener("click", function (e) {
   if (!e.target.closest("[data-sync]")) return;
@@ -518,7 +524,7 @@ function route() {
   var h = (location.hash || "#home").slice(1);
   var parts = h.split("~"), v = parts[0], arg = parts[1];
   var m = $("#main");
-  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress" }[v] || "home";
+  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress", notes: "write" }[v] || "home";
   shell(tab);
   var fn = VIEWS[v] || VIEWS.home;
   m.innerHTML = "";
@@ -556,6 +562,7 @@ VIEWS.home = function (m) {
     tile("learn", "Grammar library", SW.lessons.length + " lessons with quizzes, from parts of speech to punctuation.") +
     tile("words", "Confused words", SW.confused.length + " pairs like affect/effect, with a quiz.") +
     tile("builder", "Sentence builder", "Build S + V + O sentences and hear them.") +
+    tile("notes", "My notes", (S.notes.length ? S.notes.length + " saved sentences" : "Your mistakes and corrections, side by side") + ", for revision.") +
     tile("history", "Correction history", (S.history.length ? S.history.length + " saved corrections and feedback" : "Every fix and piece of feedback, saved and synced") + ".") +
     "</div></div>" +
     (S.settings.apiKey ? "" : '<div class="section"><div class="notice info"><b>Turn on the AI coach.</b> Add your OpenAI API key and model in <a href="#settings">Settings</a>. Everything else in the app works without it, including offline.</div></div>') +
@@ -875,11 +882,11 @@ VIEWS.drills = function (m) {
 VIEWS.write = function (m) {
   var draft = S.draft || "", dT = null;
   m.innerHTML = top("Writing studio", { eyebrow: "Write" }) +
-    '<div class="row"><button class="btn" data-go="words">Confused words</button><a class="btn" href="#guides">Writing guides</a></div>' +
+    '<div class="row"><button class="btn" data-go="notes">My notes' + (S.notes.length ? " (" + S.notes.length + ")" : "") + '</button><button class="btn" data-go="words">Confused words</button><a class="btn" href="#guides">Writing guides</a></div>' +
     '<div class="section card stack"><div class="row" style="justify-content:space-between"><h2>Draft</h2><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div>" +
     '<textarea id="ed" class="editor" rows="10" placeholder="Write or paste your email, message, speech or paragraph here.">' + esc(draft) + "</textarea>" +
     '<div class="selbar" id="selbar" hidden><span class="muted small">Selected</span><span class="selq" id="selq"></span><button class="btn primary sm" id="selGo">' + ico("spark") + 'Analyse</button></div>' +
-    '<div class="row"><button class="btn primary" id="chk">' + ico("ok") + 'Check (offline)</button><button class="btn" id="anB" title="Select a sentence, or place the cursor in one">' + ico("spark") + 'Analyse sentence</button><button class="btn" id="cpy">' + ico("copy") + 'Copy</button><button class="btn" data-say-ed>' + ico("play") + "Read aloud</button></div></div>" +
+    '<div class="row"><button class="btn primary" id="chk">' + ico("ok") + 'Check (offline)</button><button class="btn" id="anB" title="Select a sentence, or place the cursor in one">' + ico("spark") + 'Analyse sentence</button><button class="btn" id="cpy">' + ico("copy") + 'Copy</button><button class="btn" data-say-ed>' + ico("play") + 'Read aloud</button><button class="btn" id="noteB">Save as note</button></div></div>' +
     '<div id="anMount"></div><div id="chkOut"></div>' +
     '<div class="section card stack"><h2>AI rewrite</h2><p class="muted small">Pick what you want. Your draft stays as it is; the result appears below.</p><div class="row" id="aiOps">' +
     [["fix", "Fix grammar & explain"], ["formal", "More formal"], ["friendly", "More friendly"], ["short", "Shorter"], ["confident", "More confident"], ["speech", "Turn into a speech"]].map(function (o) { return '<button class="chip" data-op="' + o[0] + '">' + o[1] + "</button>"; }).join("") +
@@ -887,7 +894,30 @@ VIEWS.write = function (m) {
     '<div class="section" id="guides"><h2>Writing guides</h2><div class="grid">' + SW.guides.map(function (g) { return '<button class="tile" data-go="guide~' + g.id + '"><span class="eyebrow">' + esc(g.kind) + '</span><span class="t">' + esc(g.title) + "</span></button>"; }).join("") + "</div></div>";
   var ed = $("#ed");
   ed.oninput = function () { clearTimeout(dT); dT = setTimeout(function () { S.draft = ed.value; S.draftT = Date.now(); save(); }, 800); };
-  $("#tpl").onchange = function () { var t = SW.templates.filter(function (x) { return x.id === this.value; }, this)[0]; if (t) { ed.value = t.text; ed.oninput(); } this.value = ""; };
+  /* remember the text as you wrote it, before any AI fix, so a note can show both versions */
+  function track(before, fix) {
+    if (!S.wip || !S.wip.orig) S.wip = { orig: before, fixes: [], t: Date.now() };
+    S.wip.fixes.push(fix); S.wip.t = Date.now(); save();
+  }
+  $("#noteB").onclick = function () {
+    var cur = ed.value.trim(), btn = this;
+    if (!cur) { toast("Write something first."); return; }
+    var done = function () { S.wip = { orig: "", fixes: [], t: Date.now() }; save(); btn.textContent = "Saved ✓"; setTimeout(function () { btn.textContent = "Save as note"; }, 2000); };
+    if (S.wip && S.wip.orig && S.wip.orig.trim() !== cur) {
+      saveNote({ orig: S.wip.orig.trim(), fixed: cur, fixes: S.wip.fixes.filter(function (f) { return f.from || f.why; }), source: "Writing studio" }); done(); return;
+    }
+    if (aiReady()) {
+      btn.disabled = true; btn.textContent = "Correcting…";
+      correctWithAI(cur).then(function (j) {
+        saveNote({ orig: cur, fixed: j.corrected.trim(), fixes: (j.fixes || []).map(function (f) { return { from: f.from, to: f.to, why: f.why, topic: f.topic || "" }; }), source: "Writing studio" }); done();
+      }).catch(function (e) { toast(e.message); btn.textContent = "Save as note"; }).then(function () { btn.disabled = false; });
+      return;
+    }
+    var r = checkWriting(cur);
+    saveNote({ orig: cur, fixed: cur, pending: true, fixes: r.issues.map(function (i) { return { from: "", to: "", why: i[1], topic: i[0] }; }), source: "Writing studio (offline)" });
+    done(); toast("Saved. Open My notes when online and tap Correct with AI.");
+  };
+  $("#tpl").onchange = function () { S.wip = { orig: "", fixes: [], t: Date.now() }; var t = SW.templates.filter(function (x) { return x.id === this.value; }, this)[0]; if (t) { ed.value = t.text; ed.oninput(); } this.value = ""; };
   $("[data-say-ed]").onclick = function () { if (ed.value.trim()) say(ed.value); };
   $("#cpy").onclick = function () {
     var v = ed.value; if (!v) return;
@@ -918,18 +948,19 @@ VIEWS.write = function (m) {
         .then(function (r) {
           out.innerHTML = mdLite(r) + '<div class="row" style="margin-top:8px"><button class="btn sm" id="useR">Replace my draft</button></div>';
           logHistory("writing", "AI rewrite · " + b.textContent, t, r);
-          $("#useR").onclick = function () { ed.value = r.split(/\n\s*\n(?=[^\n]*(→|changed|removed|word count))/i)[0].trim(); ed.oninput(); toast("Draft replaced"); };
+          $("#useR").onclick = function () { track(ed.value, { from: "", to: "", why: "AI rewrite: " + b.textContent, topic: "" }); ed.value = r.split(/\n\s*\n(?=[^\n]*(→|changed|removed|word count))/i)[0].trim(); ed.oninput(); toast("Draft replaced"); };
           addXP(5);
         }).catch(function (e) { out.innerHTML = '<div class="notice">' + esc(e.message) + "</div>"; });
     };
   });
   /* sentence analysis: select text (or put the cursor in a sentence) */
   var helper = { S: function () { return S; }, ai: aiCall, aiReady: aiReady, toast: toast, log: logHistory, check: checkWriting,
-    replace: function (find, rep, within) {
+    replace: function (find, rep, within, why) {
       var v = ed.value, base = within ? v.indexOf(within) : 0, i = base < 0 ? v.indexOf(find) : v.indexOf(find, base);
       if (i < 0) return false;
+      track(v, { from: find, to: rep, why: why || "", topic: "" });
       ed.value = v.slice(0, i) + rep + v.slice(i + find.length); ed.oninput(); return true;
-    } };
+    }, saveNote: saveNote };
   function selSentence() { return SW.sentenceAt(ed.value, ed.selectionStart, ed.selectionEnd); }
   function selChange() {
     var bar = $("#selbar"); if (!bar) return;
@@ -1047,6 +1078,96 @@ VIEWS.coach = function (m, sceneId) {
     L2 = new Listener(function (f, i) { inp.value = f + (i ? " " + i : ""); }); L2.start();
   };
   cleanup.push(function () { if (L2) L2.stop(); });
+};
+
+/* ---------- Notes: your version vs corrected, for revision ---------- */
+function tokens(s) { return String(s || "").match(/[A-Za-z0-9'’]+|\s+|[^A-Za-z0-9'’\s]/g) || []; }
+function diffHTML(a, b) {
+  var A = tokens(a), B = tokens(b), n = A.length, m = B.length;
+  if (n * m > 2500000) return { a: esc(a), b: esc(b) };
+  var norm = function (t) { return /^\s+$/.test(t) ? " " : t; };
+  var L = []; for (var i = 0; i <= n; i++) { L.push(new Uint16Array(m + 1)); }
+  for (i = n - 1; i >= 0; i--) for (var j = m - 1; j >= 0; j--) L[i][j] = norm(A[i]) === norm(B[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  var oa = "", ob = "", da = "", db = "";
+  var flushA = function () { if (da) { oa += da.trim() ? '<del class="nm-del">' + esc(da.trimEnd()) + "</del>" + (/\s$/.test(da) ? " " : "") : esc(da); da = ""; } };
+  var flushB = function () { if (db) { ob += db.trim() ? '<ins class="nm-ins">' + esc(db.trimEnd()) + "</ins>" + (/\s$/.test(db) ? " " : "") : esc(db); db = ""; } };
+  i = 0; j = 0;
+  while (i < n && j < m) {
+    if (norm(A[i]) === norm(B[j])) { flushA(); flushB(); oa += esc(A[i]); ob += esc(B[j]); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) { da += A[i++]; }
+    else { db += B[j++]; }
+  }
+  while (i < n) da += A[i++]; while (j < m) db += B[j++];
+  flushA(); flushB();
+  return { a: oa.replace(/\n/g, "<br>"), b: ob.replace(/\n/g, "<br>") };
+}
+function saveNote(n) {
+  var t = Date.now();
+  var note = Object.assign({ id: "n" + t.toString(36) + Math.random().toString(36).slice(2, 5), t: t, u: t, title: "", orig: "", fixed: "", natural: "", fixes: [], source: "", revised: 0, lastRev: 0, pending: false }, n);
+  if (!note.title) note.title = note.orig.replace(/\s+/g, " ").slice(0, 60) + (note.orig.length > 60 ? "…" : "");
+  S.notes.push(note); if (S.notes.length > 500) S.notes = S.notes.slice(-500);
+  save(); toast("Saved to My notes");
+  return note;
+}
+function correctWithAI(text) {
+  return aiCall([{ role: "system", content: COACH_BASE.replace("{level}", S.settings.level) + ' Correct the learner\'s English. Fix grammar, spelling, punctuation and unnatural wording; keep their meaning, tone and layout (line breaks). Reply with ONLY JSON: {"corrected": string, "fixes": [{"from": string (exact text from the original), "to": string, "why": string (one short line), "topic": string (e.g. Articles, Verb Tenses, Prepositions)}]}. If nothing needs fixing, return the text unchanged and an empty fixes list.' }, { role: "user", content: text }], { json: true })
+    .then(function (r) { var j = null; try { j = JSON.parse(r); } catch (e) { var mm = r.match(/\{[\s\S]*\}/); if (mm) try { j = JSON.parse(mm[0]); } catch (e2) {} } if (!j || typeof j.corrected !== "string") throw new Error("Couldn't read the correction. Try again."); return j; });
+}
+VIEWS.notes = function (m) {
+  var st = { q: "", hide: false, only: "all" };
+  function draw() {
+    var all = S.notes.slice().reverse();
+    var list = all.filter(function (n) {
+      if (st.only === "due" && n.lastRev && Date.now() - n.lastRev < 3 * 864e5) return false;
+      return !st.q || (n.title + " " + n.orig + " " + n.fixed + " " + n.fixes.map(function (f) { return f.why + " " + (f.topic || ""); }).join(" ")).toLowerCase().indexOf(st.q) > -1;
+    });
+    m.innerHTML = top("My notes", { back: "write", eyebrow: S.notes.length + " saved" + (M.on ? " · synced to Google Drive" : "") }) +
+      '<p class="muted">Your own sentences next to the corrected versions. Mistakes are struck through in red, corrections highlighted in green.</p>' +
+      '<div class="row" style="margin-top:12px"><input id="nq" type="search" placeholder="Search notes, e.g. article, tense" style="flex:1;min-width:180px" value="' + esc(st.q) + '">' +
+      '<button class="chip' + (st.only === "due" ? " on" : "") + '" id="nDue">Due for revision</button><button class="chip' + (st.hide ? " on" : "") + '" id="nHide">Revision mode</button></div>' +
+      (st.hide ? '<div class="notice info" style="margin-top:12px">Corrections are hidden. Read your version, say the correct sentence aloud, then tap <b>Reveal</b>.</div>' : "") +
+      '<div class="stack" style="margin-top:14px">' + (list.length ? list.map(card).join("") : '<div class="card"><p class="muted">' + (S.notes.length ? "No notes match." : "No notes yet. In the Writing studio, tap <b>Save as note</b> after fixing your text, or save from a Sentence analysis.") + "</p></div>") + "</div>";
+    bind();
+  }
+  function card(n) {
+    var d = diffHTML(n.orig, n.fixed), same = n.orig.trim() === n.fixed.trim();
+    return '<article class="card note" data-id="' + n.id + '"><div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="min-width:0"><h3>' + esc(n.title) + '</h3><p class="muted small">' + new Date(n.t).toLocaleDateString([], { dateStyle: "medium" }) + (n.source ? " · " + esc(n.source) : "") + (n.revised ? " · revised " + n.revised + "×" : "") + "</p></div>" +
+      (n.fixes.length ? '<span class="pill warn">' + n.fixes.length + " fix" + (n.fixes.length > 1 ? "es" : "") + "</span>" : "") + "</div>" +
+      '<div class="nm-grid"><div class="nm-box nm-wrong"><span class="eyebrow">Your version</span><p>' + d.a + "</p></div>" +
+      '<div class="nm-box nm-right"' + (st.hide ? " hidden" : "") + '><span class="eyebrow">' + (n.pending ? "Not corrected yet" : same ? "Correct as written" : "Corrected") + "</span><p>" + d.b + "</p>" +
+      (n.natural ? '<p class="small" style="margin-top:6px"><span class="muted">More natural:</span> ' + esc(n.natural) + "</p>" : "") + "</div></div>" +
+      (n.fixes.length ? '<ul class="nm-fixes"' + (st.hide ? " hidden" : "") + ">" + n.fixes.map(function (f) { return "<li>" + (f.from ? '<del class="nm-del">' + esc(f.from) + "</del> → " : "") + (f.to ? '<ins class="nm-ins">' + esc(f.to) + "</ins> " : "") + '<span class="muted">' + esc(f.why || "") + (f.topic ? " · " + esc(f.topic) : "") + "</span></li>"; }).join("") + "</ul>" : "") +
+      '<div class="row"><button class="btn sm" data-n="reveal"' + (st.hide ? "" : " hidden") + ">Reveal</button>" +
+      (n.pending ? '<button class="btn sm primary" data-n="ai">Correct with AI</button>' : "") +
+      '<button class="btn sm" data-n="say">' + ico("play") + 'Hear correct</button><button class="btn sm" data-n="rev">' + ico("ok") + "Revised</button>" +
+      '<button class="btn sm ghost" data-n="edit">Open in studio</button><button class="btn sm ghost" data-n="del" style="color:var(--bad)">Delete</button>' +
+      '<span class="row" data-n-conf hidden><span class="small">Delete this note?</span><button class="btn sm" data-n="delY" style="color:var(--bad)">Yes</button><button class="btn sm" data-n="delN">No</button></span></div></article>';
+  }
+  function bind() {
+    $("#nq").oninput = function () { var pos = this.selectionStart; st.q = this.value.toLowerCase(); draw(); var q = $("#nq"); q.focus(); q.setSelectionRange(pos, pos); };
+    $("#nHide").onclick = function () { st.hide = !st.hide; draw(); };
+    $("#nDue").onclick = function () { st.only = st.only === "due" ? "all" : "due"; draw(); };
+    $$(".note").forEach(function (el) {
+      var n = S.notes.filter(function (x) { return x.id === el.getAttribute("data-id"); })[0];
+      el.onclick = function (e) {
+        var b = e.target.closest("[data-n]"); if (!b) return;
+        var a = b.getAttribute("data-n");
+        if (a === "reveal") { $$(".nm-right,.nm-fixes", el).forEach(function (x) { x.hidden = false; }); b.hidden = true; }
+        if (a === "say") say(n.fixed);
+        if (a === "rev") { n.revised = (n.revised || 0) + 1; n.lastRev = Date.now(); n.u = Date.now(); addXP(3, "note revised"); draw(); }
+        if (a === "edit") { S.draft = n.fixed; S.draftT = Date.now(); S.wip = { orig: "", fixes: [], t: Date.now() }; save(); go("write"); }
+        if (a === "del") $("[data-n-conf]", el).hidden = false;
+        if (a === "delN") $("[data-n-conf]", el).hidden = true;
+        if (a === "delY") { S.notes = S.notes.filter(function (x) { return x.id !== n.id; }); S.notesDel[n.id] = Date.now(); save(); toast("Note deleted"); draw(); }
+        if (a === "ai") {
+          b.disabled = true; b.textContent = "Correcting…";
+          correctWithAI(n.orig).then(function (j) { n.fixed = j.corrected; n.fixes = (j.fixes || []).map(function (f) { return { from: f.from, to: f.to, why: f.why, topic: f.topic || "" }; }); n.pending = false; n.u = Date.now(); save(); draw(); })
+            .catch(function (e2) { toast(e2.message); b.disabled = false; b.textContent = "Correct with AI"; });
+        }
+      };
+    });
+  }
+  draw();
 };
 
 /* ---------- Correction history ---------- */

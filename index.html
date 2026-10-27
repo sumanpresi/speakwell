@@ -122,7 +122,7 @@ details summary{cursor:pointer}
 .icon-btn svg{width:17px;height:17px}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:99px;font:500 .78rem var(--mono);background:var(--sunk);color:var(--muted);border:1px solid transparent;cursor:pointer}
 .chip.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
-.pill{display:inline-block;padding:2px 9px;border-radius:99px;font:500 .72rem var(--mono)}
+.pill{display:inline-block;white-space:nowrap;flex:none;padding:2px 9px;border-radius:99px;font:500 .72rem var(--mono)}
 .pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)}
 mark{background:var(--mark);color:var(--mark-ink);padding:0 .15em;border-radius:3px}
 input[type=text],input[type=password],input[type=search],select,textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);min-height:44px}
@@ -285,6 +285,17 @@ body.an-open{overflow:hidden}
 #anPanel.inline .an-sheet{position:static;inset:auto;width:auto;max-height:none;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);background:var(--paper);padding-bottom:0}
 #anPanel.inline .an-head{padding:14px 16px 12px}
 #anPanel.inline .an-body{overflow:visible;padding:14px 16px 18px}
+
+/* notes */
+.note{display:flex;flex-direction:column;gap:12px}
+.nm-grid{display:grid;gap:10px;grid-template-columns:1fr}
+@media (min-width:640px){.nm-grid{grid-template-columns:1fr 1fr}}
+.nm-box{border-radius:10px;padding:12px;min-width:0;line-height:1.6;overflow-wrap:anywhere}
+.nm-box p{margin-top:4px}
+.nm-wrong{background:var(--bad-soft)} .nm-right{background:var(--ok-soft)}
+del.nm-del{color:var(--bad);text-decoration:line-through;text-decoration-thickness:2px;background:color-mix(in srgb,var(--bad) 14%,transparent);border-radius:3px;padding:0 2px}
+ins.nm-ins{color:var(--ok);text-decoration:none;font-weight:700;background:color-mix(in srgb,var(--ok) 18%,transparent);border-radius:3px;padding:0 2px}
+.nm-fixes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:.92rem}
 </style>
 </head>
 <body>
