@@ -31,7 +31,7 @@ var KEY = "speakwell.v1";
    - active days are a set, streak is computed from it
    - lessons, sessions, history and chats carry timestamps and are unioned */
 var defaults = {
-  name: "", done: {}, days: {}, counts: {}, sessions: [], history: [], chats: {}, chatsT: {}, draft: "", draftT: 0, analyses: {}, notes: [], notesDel: {}, wip: { orig: "", fixes: [], t: 0 },
+  name: "", done: {}, days: {}, counts: {}, sessions: [], history: [], chats: {}, chatsT: {}, draft: "", draftT: 0, analyses: {}, notes: [], notesDel: {}, wip: { orig: "", fixes: [], t: 0 }, curNote: "",
   resetAt: 0, historyClearedAt: 0, updatedAt: 0,
   xp: 0, streak: 0, writes: 0, quiz: { right: 0, total: 0 },
   settings: { apiKey: "", baseUrl: "https://api.openai.com/v1", model: "gpt-5.6-luna", transcribeModel: "gpt-4o-mini-transcribe",
@@ -328,7 +328,7 @@ function merge(a, b) {
     if (t > R || (!ta && !tb)) { out.chats[k] = (w.chats || {})[k] || []; out.chatsT[k] = t; }
   });
   if ((b.draftT || 0) > (a.draftT || 0)) { out.draft = b.draft; out.draftT = b.draftT; }
-  if ((b.draftT || 0) > (a.draftT || 0) && b.wip) out.wip = b.wip;
+  if ((b.draftT || 0) > (a.draftT || 0)) { if (b.wip) out.wip = b.wip; out.curNote = b.curNote || ""; }
   out.notesDel = Object.assign({}, a.notesDel || {});
   Object.keys(b.notesDel || {}).forEach(function (k) { out.notesDel[k] = Math.max(out.notesDel[k] || 0, b.notesDel[k]); });
   var nm = {};
@@ -891,65 +891,87 @@ VIEWS.drills = function (m) {
 
 /* ---------- Write ---------- */
 VIEWS.write = function (m) {
-  var draft = S.draft || "", dT = null;
+  /* migrate the old "work in progress" link to the draft↔note link */
+  if (!S.curNote && S.wip && S.wip.noteId && S.notes.some(function (x) { return x.id === S.wip.noteId; })) { S.curNote = S.wip.noteId; S.wip = { orig: "", fixes: [], t: 0 }; save(); }
+  var n0 = curNote();
+  if (n0 && S.draft && S.draft !== n0.fixed && (S.draftT || 0) > (n0.u || 0)) docUpdate(n0, S.draft);
+  var draft = n0 ? n0.fixed : (S.draft || ""), dT = null;
   m.innerHTML = top("Writing studio", { eyebrow: "Write" }) +
     '<div class="row"><button class="btn" data-go="notes">My notes' + (S.notes.length ? " (" + S.notes.length + ")" : "") + '</button><button class="btn" data-go="words">Confused words</button><a class="btn" href="#guides">Writing guides</a></div>' +
-    '<div class="split"><div class="col-main"><div class="section card stack"><div class="row" style="justify-content:space-between"><h2>Draft</h2><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div>" +
-    '<textarea id="ed" class="editor" rows="10" placeholder="Write or paste your email, message, speech or paragraph here.">' + esc(draft) + "</textarea>" +
+    '<div class="split"><div class="col-main"><div class="section card stack"><div class="row" style="justify-content:space-between"><div class="stack" style="gap:2px;min-width:0"><h2>Draft</h2><span class="muted small" id="docLink"></span></div><div class="row tight"><button class="btn sm" id="newB">+ New draft</button><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div></div>" +
+    '<textarea id="ed" class="editor" rows="10" placeholder="Write or paste your email, message, speech or paragraph here. It is saved to My notes as you type.">' + esc(draft) + "</textarea>" +
     '<div class="selbar" id="selbar" hidden><span class="muted small">Selected</span><span class="selq" id="selq"></span><button class="btn primary sm" id="selGo">' + ico("spark") + 'Analyse</button></div>' +
-    '<div class="row"><button class="btn" id="chk" title="Instant grammar and style check. Works offline.">' + ico("ok") + 'Quick check</button><button class="btn" id="anB" title="Select a sentence, or place the cursor in one">' + ico("spark") + 'Analyse sentence</button><button class="btn" id="cpy">' + ico("copy") + 'Copy</button><button class="btn" data-say-ed>' + ico("play") + 'Read aloud</button><button class="btn" id="noteB">Save as note</button></div></div>' +
+    '<div class="row"><button class="btn" id="chk" title="Instant grammar and style check. Works offline.">' + ico("ok") + 'Quick check</button><button class="btn" id="anB" title="Select a sentence, or place the cursor in one">' + ico("spark") + 'Analyse sentence</button><button class="btn" id="fixAll" title="AI corrects the whole draft; your original stays in the note">' + ico("spark") + 'Correct all</button><button class="btn" id="cpy">' + ico("copy") + 'Copy</button><button class="btn" data-say-ed>' + ico("play") + 'Read aloud</button><button class="btn" id="noteB">' + ico("note") + "Open note</button></div></div>" +
     '<div id="anMount"></div><div id="chkOut"></div></div><div class="col-side">' +
     '<div class="section card stack"><h2>AI rewrite</h2><p class="muted small">Pick what you want. Your draft stays as it is; the result appears below.</p><div class="row" id="aiOps">' +
     [["fix", "Fix grammar & explain"], ["formal", "More formal"], ["friendly", "More friendly"], ["short", "Shorter"], ["confident", "More confident"], ["speech", "Turn into a speech"]].map(function (o) { return '<button class="chip" data-op="' + o[0] + '">' + o[1] + "</button>"; }).join("") +
     '</div><div id="aiW" class="ai-out"></div></div>' +
     '<div class="section" id="guides"><h2>Writing guides</h2><div class="card guide-list">' + SW.guides.map(function (g) { return '<button class="listrow" data-go="guide~' + g.id + '"><span class="grow"><span class="t">' + esc(g.title) + '</span><br><span class="d">' + esc(g.kind) + "</span></span></button>"; }).join("") + "</div></div></div></div>";
   var ed = $("#ed");
-  ed.oninput = function () { clearTimeout(dT); dT = setTimeout(function () { S.draft = ed.value; S.draftT = Date.now(); save(); }, 800); };
-  /* remember the text as you wrote it, before any AI fix, so a note can show both versions */
-  function track(before, fix) {
-    if (!S.wip || !S.wip.fixes) S.wip = { orig: "", fixes: [], t: Date.now(), noteId: "" };
-    fix.r = true; S.wip.fixes.push(fix); S.wip.t = Date.now();
+  /* The draft and its note are one document: every edit updates the note */
+  function updDoc() {
+    var n = curNote(), l = $("#docLink"), nb = $("#noteB");
+    if (l) l.innerHTML = n ? "Saved to note <b>" + esc(n.title) + "</b> · " + (n.fixes || []).filter(function (f) { return f.r; }).length + " fixes" : "New draft · saved to My notes once you write a few words";
+    if (nb) nb.disabled = !n;
   }
-  function afterChange() { S.draft = ed.value; S.draftT = Date.now(); var n = syncDraftNote(ed.value, !!(S.wip && S.wip.noteId)); updateNoteBtn(n); }
-  function updateNoteBtn(n) { var nb = $("#noteB"); if (!nb) return; n = n || (S.wip && S.wip.noteId && S.notes.filter(function (x) { return x.id === S.wip.noteId; })[0]); nb.textContent = n ? "Open note" : "Save as note"; nb.setAttribute("data-open", n ? n.id : ""); }
-  /* Save as note: if fixes were already applied, the draft's note exists — open it.
-     Otherwise the AI corrects the whole draft, the draft becomes the corrected text, and
-     the note keeps your original next to the correction, sentence by sentence. */
-  function saveDraftNote(btn) {
-    var cur = ed.value.trim();
-    if (!cur) { toast("Write something first."); return; }
-    var open = btn && btn.getAttribute("data-open");
-    if (open && S.notes.some(function (x) { return x.id === open; }) && !btn.hasAttribute("data-force")) { go("note~" + open); return; }
-    if (S.wip && S.wip.fixes && S.wip.fixes.length) { var n0 = syncDraftNote(ed.value, false); updateNoteBtn(n0); return; }
-    if (aiReady()) {
-      if (btn) { btn.disabled = true; btn.textContent = "Correcting…"; }
-      correctWithAI(cur).then(function (j) {
-        var fixed = j.corrected.trim();
-        var details = (j.fixes || []).map(function (f) { return { from: f.from, to: f.to, why: f.why, topic: f.topic || "" }; });
-        S.wip = { orig: "", fixes: [], t: Date.now(), noteId: "" };
-        if (fixed !== cur) track(cur, { from: cur, to: fixed, why: "AI correction", topic: "", big: true });
-        details.forEach(function (d) { S.wip.fixes.push(d); });
-        if (fixed !== cur) { ed.value = fixed; }
-        var n = fixed !== cur ? syncDraftNote(fixed, false) : saveNote({ orig: cur, fixed: cur, fixes: [], source: "Writing studio" });
-        if (fixed === cur) { S.wip.noteId = n.id; toast("No mistakes found. Saved to My notes."); }
-        else toast("Draft corrected. Your original is kept in the note.");
-        afterChangeSilent(); updateNoteBtn(n);
-      }).catch(function (e) { toast(e.message); }).then(function () { if (btn) { btn.disabled = false; updateNoteBtn(); } });
-      return;
+  function commit() {
+    clearTimeout(dT);
+    var v = ed.value; S.draft = v; S.draftT = Date.now();
+    var n = curNote();
+    if (v.trim()) {
+      if (n) docUpdate(n, v);
+      else if (wordCount(v) >= 3) { n = saveNote({ orig: v, fixed: v, fixes: [], source: "Writing studio" }, true); S.curNote = n.id; }
     }
-    var r = checkWriting(cur);
-    var n2 = saveNote({ orig: cur, fixed: cur, pending: true, fixes: r.issues.map(function (i) { return { from: "", to: "", why: i[1], topic: i[0] }; }), source: "Writing studio (offline)" });
-    S.wip = { orig: "", fixes: [], t: Date.now(), noteId: n2.id }; save(); updateNoteBtn(n2);
-    toast("Saved. Open the note when online and tap Correct with AI.");
+    save(); updDoc();
   }
-  function afterChangeSilent() { S.draft = ed.value; S.draftT = Date.now(); save(); }
-  $("#noteB").onclick = function () { saveDraftNote(this); };
-  updateNoteBtn();
-  ed.addEventListener("input", function () {
-    if (!ed.value.trim() && S.wip && (S.wip.fixes.length || S.wip.noteId)) { S.wip = { orig: "", fixes: [], t: Date.now(), noteId: "" }; save(); updateNoteBtn(); }
-    else if (S.wip && S.wip.noteId) { clearTimeout(ed._nT); ed._nT = setTimeout(function () { syncDraftNote(ed.value, true); }, 1500); }
-  });
-  $("#tpl").onchange = function () { S.wip = { orig: "", fixes: [], t: Date.now(), noteId: "" }; updateNoteBtn(); var t = SW.templates.filter(function (x) { return x.id === this.value; }, this)[0]; if (t) { ed.value = t.text; ed.oninput(); } this.value = ""; };
+  ed.oninput = function () { clearTimeout(dT); dT = setTimeout(commit, 700); };
+  cleanup.push(function () { if (dT) commit(); });
+  window.addEventListener("pagehide", commit); cleanup.push(function () { window.removeEventListener("pagehide", commit); });
+  /* record an AI change so "your version" can always be rebuilt from the draft */
+  function addFix(before, after, i, from, to, why, topic, big) {
+    var n = curNote(), first = false;
+    if (!n) { n = saveNote({ orig: before, fixed: before, fixes: [], source: "Writing studio" }, true); S.curNote = n.id; }
+    else docUpdate(n, before);
+    first = !(n.fixes || []).some(function (f) { return f.r; });
+    n.fixes = n.fixes || [];
+    n.fixes.push({ from: from, to: to, why: why || "", topic: topic || "", r: true, big: !!big, at: i, pre: after.slice(Math.max(0, i - 24), i), post: after.slice(i + to.length, i + to.length + 24) });
+    docUpdate(n, after);
+    S.draft = after; S.draftT = Date.now(); save(); updDoc();
+    if (first) toast("Fix saved to this draft's note");
+  }
+  $("#noteB").onclick = function () { commit(); var n = curNote(); if (n) go("note~" + n.id); };
+  $("#newB").onclick = function () {
+    commit(); var had = curNote();
+    S.curNote = ""; S.draft = ""; S.draftT = Date.now(); ed.value = ""; save(); updDoc();
+    if ($("#anMount")) $("#anMount").innerHTML = ""; if ($("#chkOut")) $("#chkOut").innerHTML = "";
+    toast(had ? "New draft started. The previous one is in My notes." : "New draft started"); ed.focus();
+  };
+  $("#fixAll").onclick = function () {
+    commit();
+    var cur = ed.value, btn = this;
+    if (!cur.trim()) { toast("Write something first."); return; }
+    if (!aiReady()) { toast(S.settings.apiKey ? "Correct all needs a connection. Your draft is saved; try again online." : "Add your OpenAI key in Settings to use Correct all."); return; }
+    btn.disabled = true; btn.textContent = "Correcting…";
+    correctWithAI(cur).then(function (j) {
+      var text = ed.value, count = 0;
+      (j.fixes || []).forEach(function (f) {
+        if (!f.from || f.from === f.to) return;
+        var i = text.indexOf(f.from); if (i < 0) return;
+        var nt = text.slice(0, i) + (f.to || "") + text.slice(i + f.from.length);
+        addFix(text, nt, i, f.from, f.to || "", f.why, f.topic); text = nt; count++;
+      });
+      if (j.corrected && nrm(text) !== nrm(j.corrected)) { addFix(text, j.corrected, 0, text, j.corrected, "Other AI corrections", "", true); text = j.corrected; count++; }
+      ed.value = text; S.draft = text; save(); updDoc();
+      toast(count ? count + " correction" + (count > 1 ? "s" : "") + " applied. Your original is kept in the note." : "No mistakes found.");
+      logHistory("writing", "Correct all · " + count + " fixes", cur, text);
+    }).catch(function (e) { toast(e.message); }).then(function () { btn.disabled = false; btn.innerHTML = ico("spark") + "Correct all"; });
+  };
+  $("#tpl").onchange = function () {
+    var t = SW.templates.filter(function (x) { return x.id === this.value; }, this)[0]; this.value = "";
+    if (!t) return;
+    commit(); S.curNote = ""; ed.value = t.text; commit(); toast("New draft from template");
+  };
+  updDoc();
   $("[data-say-ed]").onclick = function () { if (ed.value.trim()) say(ed.value); };
   $("#cpy").onclick = function () {
     var v = ed.value; if (!v) return;
@@ -980,7 +1002,7 @@ VIEWS.write = function (m) {
         .then(function (r) {
           out.innerHTML = mdLite(r) + '<div class="row" style="margin-top:8px"><button class="btn sm" id="useR">Replace my draft</button></div>';
           logHistory("writing", "AI rewrite · " + b.textContent, t, r);
-          $("#useR").onclick = function () { var before = ed.value, nv = r.split(/\n\s*\n(?=[^\n]*(→|changed|removed|word count))/i)[0].trim(); track(before, { from: before, to: nv, why: "AI rewrite: " + b.textContent, topic: "", big: true }); ed.value = nv; afterChange(); toast("Draft replaced. Your original is kept in the note."); };
+          $("#useR").onclick = function () { commit(); var before = ed.value, nv = r.split(/\n\s*\n(?=[^\n]*(→|changed|removed|word count))/i)[0].trim(); addFix(before, nv, 0, before, nv, "AI rewrite: " + b.textContent, "", true); ed.value = nv; toast("Draft replaced. Your original is kept in the note."); };
           addXP(5);
         }).catch(function (e) { out.innerHTML = '<div class="notice">' + esc(e.message) + "</div>"; });
     };
@@ -990,9 +1012,10 @@ VIEWS.write = function (m) {
     replace: function (find, rep, within, why, topic) {
       var v = ed.value, base = within ? v.indexOf(within) : 0, i = base < 0 ? v.indexOf(find) : v.indexOf(find, base);
       if (i < 0) return false;
-      track(v, { from: find, to: rep, why: why || "", topic: topic || "" });
-      ed.value = v.slice(0, i) + rep + v.slice(i + find.length); afterChange(); return true;
-    }, saveNote: function () { saveDraftNote(null); }, openNote: function () { if (S.wip && S.wip.noteId) go("note~" + S.wip.noteId); } };
+      commit(); v = ed.value; i = (within && v.indexOf(within) > -1) ? v.indexOf(find, v.indexOf(within)) : v.indexOf(find); if (i < 0) return false;
+      var nv = v.slice(0, i) + rep + v.slice(i + find.length);
+      addFix(v, nv, i, find, rep, why, topic); ed.value = nv; return true;
+    }, saveNote: function () { commit(); var n = curNote(); if (n) go("note~" + n.id); else toast("Write a few words first."); }, openNote: function () { commit(); var n = curNote(); if (n) go("note~" + n.id); } };
   function selSentence() { return SW.sentenceAt(ed.value, ed.selectionStart, ed.selectionEnd); }
   function selChange() {
     var bar = $("#selbar"); if (!bar) return;
@@ -1184,18 +1207,23 @@ function saveNote(n, quiet) {
   save();
   return note;
 }
-/* The writer's own version = current draft with every AI change undone */
+/* The writer's own version = current draft with every AI change undone (newest first) */
 function revertFixes(text, fixes) {
-  var ok = true;
   for (var i = fixes.length - 1; i >= 0; i--) {
-    var f = fixes[i]; if (!f.r) continue;
-    var at = f.to ? text.indexOf(f.to) : -1;
-    if (at < 0) { ok = false; continue; }
-    text = text.slice(0, at) + f.from + text.slice(at + f.to.length);
+    var f = fixes[i]; if (!f.r || typeof f.to !== "string") continue;
+    var at = -1;
+    if (f.pre != null) { var ctx = (f.pre || "") + f.to + (f.post || ""), k0 = text.indexOf(ctx); if (k0 > -1) at = k0 + (f.pre || "").length; }
+    if (at < 0 && f.to) { var best = -1, dist = 1e9, k = text.indexOf(f.to); while (k > -1) { var d = Math.abs(k - (f.at || 0)); if (d < dist) { dist = d; best = k; } k = text.indexOf(f.to, k + 1); } at = best; }
+    if (at < 0) continue;
+    text = text.slice(0, at) + (f.from || "") + text.slice(at + f.to.length);
   }
-  return { text: text, ok: ok };
+  return { text: text };
 }
-/* Keep the draft's note in step with the draft */
+function curNote() { return (S.curNote && S.notes.filter(function (x) { return x.id === S.curNote; })[0]) || null; }
+function docUpdate(n, cur) {
+  n.fixed = cur; n.orig = revertFixes(cur, n.fixes || []).text; n.u = Date.now();
+  if (!n.titleSet) n.title = noteTitle(cur);
+}
 /* Merge note `small` into note `big` (same draft). Keeps every fix and restores the writer's own wording. */
 function nrm(x) { return String(x || "").replace(/\s+/g, " ").trim(); }
 function mergeNotes(big, small) {
@@ -1219,7 +1247,7 @@ function mergeNotes(big, small) {
   big.pending = !!(big.pending && small.pending);
   if (!big.titleSet) big.title = noteTitle(big.fixed);
   S.notes = S.notes.filter(function (x) { return x.id !== small.id; }); S.notesDel[small.id] = Date.now();
-  if (S.wip && S.wip.noteId === small.id) S.wip.noteId = big.id;
+  if (S.curNote === small.id) S.curNote = big.id;
   return big;
 }
 /* Notes whose text sits inside another note's draft belong to that draft */
@@ -1230,7 +1258,7 @@ function autoMergeNotes() {
     var list = S.notes.slice().sort(function (a, b) { return nrm(b.fixed).length - nrm(a.fixed).length; });
     outer: for (var i = 0; i < list.length; i++) for (var j = i + 1; j < list.length; j++) {
       var big = list[i], sm = list[j], sf = nrm(sm.fixed), so = nrm(sm.orig);
-      if (sf.length < 15) continue;
+      if (sf.length < 15 || sm.id === S.curNote) continue;
       if (nrm(big.fixed).indexOf(sf) > -1 || nrm(big.orig).indexOf(so) > -1 || nrm(big.fixed).indexOf(so) > -1 || nrm(big.orig).indexOf(sf) > -1) {
         mergeNotes(big, sm); changed = again = true; break outer;
       }
@@ -1240,16 +1268,6 @@ function autoMergeNotes() {
   return changed;
 }
 
-function syncDraftNote(cur, quiet) {
-  var w = S.wip; if (!w || !w.fixes || !w.fixes.length) return null;
-  var existing = w.noteId && S.notes.filter(function (x) { return x.id === w.noteId; })[0];
-  var rv = revertFixes(cur, w.fixes);
-  var orig = rv.ok || !existing ? rv.text : existing.orig;
-  var note = saveNote({ id: existing ? existing.id : null, orig: orig.trim(), fixed: cur.trim(), fixes: w.fixes.slice(), source: "Writing studio", pending: false }, quiet);
-  w.noteId = note.id; save();
-  if (autoMergeNotes()) { note = S.notes.filter(function (x) { return x.id === w.noteId; })[0] || note; }
-  return note;
-}
 function correctWithAI(text) {
   return aiCall([{ role: "system", content: COACH_BASE.replace("{level}", S.settings.level) + ' Correct the learner\'s English. Fix grammar, spelling, punctuation and unnatural wording; keep their meaning, tone and layout (keep every line break). Reply with ONLY JSON: {"corrected": string, "fixes": [{"from": string (exact text from the original), "to": string, "why": string (one short line), "topic": string (e.g. Articles, Verb Tenses, Prepositions)}]}. If nothing needs fixing, return the text unchanged and an empty fixes list.' }, { role: "user", content: text }], { json: true })
     .then(function (r) { var j = null; try { j = JSON.parse(r); } catch (e) { var mm = r.match(/\{[\s\S]*\}/); if (mm) try { j = JSON.parse(mm[0]); } catch (e2) {} } if (!j || typeof j.corrected !== "string") throw new Error("Couldn't read the correction. Try again."); return j; });
@@ -1279,7 +1297,7 @@ VIEWS.notes = function (m, id) {
       '<div class="row tight"><button class="chip' + (NS.only === "all" ? " on" : "") + '" data-nf="all">All</button><button class="chip' + (NS.only === "due" ? " on" : "") + '" data-nf="due">Due for revision</button></div>' +
       '<div class="nl-items">' + (items.length ? items.map(function (n) {
         var pairs = sentencePairs(n.orig, n.fixed), ch = pairs.filter(function (p) { return p.changed; }).length;
-        return '<button class="nl-item' + (cur && cur.id === n.id ? " on" : "") + '" data-go="note~' + n.id + '"><b>' + esc(n.title) + '</b><span class="nl-prev">' + esc(n.fixed.replace(/\s+/g, " ").slice(0, 90)) + '</span><span class="nl-meta">' + relDate(n.u) + " · " + (n.pending ? "not corrected yet" : ch + " of " + pairs.length + " sentences fixed") + " · " + wordCount(n.fixed) + " words</span>" +
+        return '<button class="nl-item' + (cur && cur.id === n.id ? " on" : "") + '" data-go="note~' + n.id + '"><b>' + esc(n.title) + "</b>" + (S.curNote === n.id ? '<span class="pill ok" style="align-self:flex-start">Open in Write</span>' : "") + '<span class="nl-prev">' + esc(n.fixed.replace(/\s+/g, " ").slice(0, 90)) + '</span><span class="nl-meta">' + relDate(n.u) + " · " + (n.pending ? "not corrected yet" : ch + " of " + pairs.length + " sentences fixed") + " · " + wordCount(n.fixed) + " words</span>" +
           (noteTags(n).length ? '<span class="nl-tags">' + noteTags(n).map(function (t) { return "<i>#" + esc(t) + "</i>"; }).join("") + "</span>" : "") + "</button>";
       }).join("") : '<p class="muted small" style="padding:12px">' + (all.length ? "No notes match." : "No notes yet. In the Writing studio, fix a sentence or tap Save as note.") + "</p>") + "</div></div>";
   }
@@ -1302,15 +1320,17 @@ VIEWS.notes = function (m, id) {
       '<p class="muted small">' + new Date(n.t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + " · " + esc(n.source || "") + " · " + wordCount(n.fixed) + " words" + (n.revised ? " · revised " + n.revised + "×" : "") + "</p>" +
       (noteTags(n).length ? '<div class="nl-tags">' + noteTags(n).map(function (t) { return "<i>#" + esc(t) + "</i>"; }).join("") + "</div>" : "") +
       '<div class="nd-stats"><div><b>' + ch.length + "</b><span>sentences fixed</span></div><div><b>" + (pairs.length - ch.length) + "</b><span>already correct</span></div><div><b>" + fx.length + "</b><span>corrections</span></div></div>" +
-      '<div class="row tight"><button class="btn sm" data-a="say">' + ico("play") + 'Hear correct</button><button class="btn sm" data-a="rev">' + ico("ok") + 'Revised</button><button class="btn sm" data-a="edit">Open in studio</button>' +
+      '<div class="row tight"><button class="btn sm" data-a="say">' + ico("play") + 'Hear correct</button><button class="btn sm" data-a="rev">' + ico("ok") + 'Revised</button><button class="btn sm primary" data-a="edit">' + ico("write") + 'Edit draft</button>' +
       (n.pending ? '<button class="btn sm primary" data-a="ai">Correct with AI</button>' : "") + '<button class="btn sm ghost" data-a="del" style="color:var(--bad)">Delete</button>' +
       '<span class="row tight" id="ndConf" hidden><span class="small">Delete this note?</span><button class="btn sm" data-a="delY" style="color:var(--bad)">Yes</button><button class="btn sm" data-a="delN">No</button></span></div>' +
       (S.notes.length > 1 ? '<div class="row tight"><label class="small muted" for="ndMerge">Merge another note into this one</label><select id="ndMerge" style="width:auto;min-width:0;flex:1;max-width:340px"><option value="">Choose a note…</option>' + S.notes.filter(function (x) { return x.id !== n.id; }).sort(function (a, b) { return b.u - a.u; }).map(function (x) { return '<option value="' + x.id + '">' + esc(x.title) + " · " + relDate(x.u) + "</option>"; }).join("") + '</select><button class="btn sm" data-a="merge">Merge</button></div>' : "") +
+      '<div class="section"><h2>Full text</h2><div class="nm-grid"><div class="nm-box nm-wrong"><span class="eyebrow">Your version (draft)</span><p class="hbody">' + esc(n.orig) + '</p></div><div class="nm-box nm-right"><span class="eyebrow">Correct</span><p class="hbody">' + esc(n.fixed) + "</p></div></div></div>" +
+      '<div class="section"><div class="row" style="justify-content:space-between"><h2>Fixed sentences</h2><span class="muted small">' + ch.length + " of " + pairs.length + ' sentences</span></div></div>' +
       '<div class="row tight"><button class="chip' + (NS.changedOnly ? " on" : "") + '" data-a="changed">Fixed sentences only</button><button class="chip' + (NS.hide ? " on" : "") + '" data-a="hide">Revision mode</button></div>' +
       (NS.hide ? '<div class="notice info">Corrections are hidden. Read your version, say the correct sentence aloud, then tap Reveal.</div>' : "") +
       '<div class="np">' + (rows || '<p class="muted">Nothing to show.</p>') + "</div>" +
       (rest.length && !NS.hide ? '<div class="section"><h3 class="eyebrow">Other notes on this draft</h3><ul class="nm-fixes">' + rest.map(function (f) { return '<li><span class="muted">' + esc(f.why || "") + (f.topic ? " · " + esc(f.topic) : "") + "</span></li>"; }).join("") + "</ul></div>" : "") +
-      '<details class="section"><summary class="muted">Full text</summary><div class="nm-grid" style="margin-top:10px"><div class="nm-box nm-wrong"><span class="eyebrow">Your version</span><p class="hbody">' + esc(n.orig) + '</p></div><div class="nm-box nm-right"><span class="eyebrow">Correct</span><p class="hbody">' + esc(n.fixed) + "</p></div></div></details></div>";
+      "</div>";
   }
   var head = top("My notes", { back: wide || !cur ? "write" : "notes", eyebrow: S.notes.length + " saved" + (M.on ? " · synced to Google Drive" : "") });
   if (wide) m.innerHTML = head + '<div class="nwrap">' + list() + (cur ? detail(cur) : '<div class="nd"><p class="muted">Select a note.</p></div>') + "</div>";
@@ -1328,7 +1348,7 @@ VIEWS.notes = function (m, id) {
     var a = b.getAttribute("data-a");
     if (a === "say") say(cur.fixed);
     if (a === "rev") { cur.revised = (cur.revised || 0) + 1; cur.lastRev = Date.now(); cur.u = Date.now(); addXP(3, "note revised"); route(); }
-    if (a === "edit") { S.draft = cur.fixed; S.draftT = Date.now(); S.wip = { orig: cur.orig, fixes: (cur.fixes || []).slice(), t: Date.now(), noteId: cur.id }; save(); go("write"); }
+    if (a === "edit") { S.curNote = cur.id; S.draft = cur.fixed; S.draftT = Date.now(); save(); go("write"); }
     if (a === "changed") { NS.changedOnly = !NS.changedOnly; route(); }
     if (a === "hide") { NS.hide = !NS.hide; route(); }
     if (a === "del") $("#ndConf").hidden = false;
@@ -1339,7 +1359,7 @@ VIEWS.notes = function (m, id) {
       var keep = nrm(other.fixed).length > nrm(cur.fixed).length ? other : cur, drop = keep === cur ? other : cur;
       mergeNotes(keep, drop); save(); toast("Notes merged"); go("note~" + keep.id);
     }
-    if (a === "delY") { S.notes = S.notes.filter(function (x) { return x.id !== cur.id; }); S.notesDel[cur.id] = Date.now(); if (S.wip && S.wip.noteId === cur.id) S.wip.noteId = ""; save(); toast("Note deleted"); go("notes"); }
+    if (a === "delY") { S.notes = S.notes.filter(function (x) { return x.id !== cur.id; }); S.notesDel[cur.id] = Date.now(); if (S.curNote === cur.id) { S.curNote = ""; S.draft = ""; } save(); toast("Note deleted"); go("notes"); }
     if (a === "ai") {
       b.disabled = true; b.textContent = "Correcting…";
       correctWithAI(cur.orig).then(function (j) { cur.fixed = j.corrected.trim(); cur.fixes = (j.fixes || []).map(function (f) { return { from: f.from, to: f.to, why: f.why, topic: f.topic || "" }; }); cur.pending = false; cur.u = Date.now(); if (!cur.titleSet) cur.title = noteTitle(cur.fixed); save(); route(); })
