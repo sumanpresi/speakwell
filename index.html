@@ -389,6 +389,23 @@ a.nlink.inner{text-decoration-style:dashed}
 #instHelp{margin-bottom:18px;border-color:var(--accent)}
 .doc-head{flex:1 1 320px;min-width:0}
 .doc-head .doc-title{width:100%}
+
+/* notes list inside the side menu */
+.rail-notes{display:flex;flex-direction:column;gap:6px;min-height:0;flex:1 1 auto;margin:2px 0 6px 14px;padding-left:10px;border-left:2px solid var(--line)}
+.rail-notes + .spacer{flex:0 0 8px}
+.rn-tools{display:flex;gap:6px;align-items:center}
+.rn-tools input{min-height:32px;padding:5px 9px;font-size:.85rem;border-radius:8px}
+.rn-tools .icon-btn{width:30px;height:30px;font-size:1.1rem;flex:none}
+.rn-chips{display:flex;flex-wrap:wrap;gap:4px}
+.rail .rn-chip{display:inline-flex;padding:2px 8px;border-radius:99px;font:500 .7rem var(--mono);background:var(--sunk);color:var(--muted);border:1px solid transparent;cursor:pointer;gap:0}
+.rail .rn-chip.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.rn-list{display:flex;flex-direction:column;overflow-y:auto;min-height:0;gap:1px}
+.rail .rn-item{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:8px;font-weight:500;font-size:.88rem;color:var(--ink);text-align:left;width:100%}
+.rail .rn-item.on{background:var(--accent-soft);color:var(--accent);font-weight:700}
+.rn-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rn-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.nwrap.solo{display:block;min-height:0}
+.nwrap.solo .nd{max-width:none}
 </style>
 </head>
 <body>
