@@ -934,12 +934,18 @@ VIEWS.drills = function (m) {
 VIEWS.write = function (m) {
   /* migrate the old "work in progress" link to the draft↔note link */
   if (!S.curNote && S.wip && S.wip.noteId && S.notes.some(function (x) { return x.id === S.wip.noteId; })) { S.curNote = S.wip.noteId; S.wip = { orig: "", fixes: [], t: 0 }; save(); }
+  /* a draft that came back from sync without its link: find its note instead of making a new one */
+  if (!curNote() && S.draft && S.draft.trim()) {
+    var dn = nrm(S.draft), match = S.notes.filter(function (x) { return nrm(x.fixed) === dn || nrm(x.orig) === dn; })[0] ||
+      S.notes.slice().sort(function (a, b) { return b.u - a.u; }).filter(function (x) { var f = nrm(x.fixed); return f.length > 20 && (dn.indexOf(f.slice(0, 60)) === 0 || f.indexOf(dn.slice(0, 60)) === 0); })[0];
+    if (match) { S.curNote = match.id; save(); }
+  }
   var n0 = curNote();
   if (n0 && S.draft && S.draft !== n0.fixed && (S.draftT || 0) > (n0.u || 0)) docUpdate(n0, S.draft);
   var draft = n0 ? n0.fixed : (S.draft || ""), dT = null;
   m.innerHTML = top("Writing studio", { eyebrow: "Write" }) +
     '<div class="row"><button class="btn" data-go="notes">My notes' + (S.notes.length ? " (" + S.notes.length + ")" : "") + '</button><button class="btn" data-go="words">Confused words</button><a class="btn" href="#guides">Writing guides</a></div>' +
-    '<div class="split"><div class="col-main"><div class="section card stack"><div class="row" style="justify-content:space-between"><div class="stack" style="gap:2px;min-width:0;flex:1"><label class="eyebrow" for="docTitle">Draft title</label><input id="docTitle" class="doc-title" type="text" placeholder="Untitled draft (type a title)"><span class="muted small" id="docLink"></span></div><div class="row tight"><button class="btn sm" id="newB">+ New draft</button><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div></div>" +
+    '<div class="split"><div class="col-main"><div class="section card stack"><div class="row" style="justify-content:space-between"><div class="stack doc-head" style="gap:2px"><label class="eyebrow" for="docTitle">Draft title</label><input id="docTitle" class="doc-title" type="text" placeholder="Untitled draft (type a title)"><span class="muted small" id="docLink"></span></div><div class="row tight"><button class="btn sm" id="newB">+ New draft</button><select id="tpl" style="width:auto"><option value="">Start from a template…</option>' + SW.templates.map(function (t) { return '<option value="' + t.id + '">' + t.name + "</option>"; }).join("") + "</select></div></div>" +
     '<div id="docTags"></div>' +
     '<textarea id="ed" class="editor" rows="10" placeholder="Write or paste your email, message, speech or paragraph here. It is saved to My notes as you type. Select text and press Ctrl+K (or right-click) to add a link.">' + esc(draft) + "</textarea>" +
     '<div id="docLinks"></div><div id="docAtt"></div>' +
