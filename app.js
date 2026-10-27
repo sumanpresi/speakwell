@@ -27,6 +27,7 @@ var I = {
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="M15 10l-2 2 2 2"/>',
   chev: '<path d="M6 9l6 6 6-6"/>',
   more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  studio: '<path d="M4 5h11v9H8l-4 3z"/><path d="M15 9h5v9l-3-2h-6v-2"/><path d="M7 9h5"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 011-1h10"/>'
 };
 function ico(n) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + I[n] + '</svg>'; }
@@ -552,7 +553,7 @@ function shell(active) {
   var bottom = active === "notes" ? "write" : active;
   var t = NAV.map(function (n) { return '<button class="tab" data-go="' + n[0] + '"' + (bottom === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + n[1] + "</button>"; }).join("");
   $("#tabs").innerHTML = t;
-  var navItems = NAV.concat([["progress", "Progress", "chart"]]);
+  var navItems = NAV.slice(0, 5).concat([["studio", "Spoken English", "studio"], ["progress", "Progress", "chart"]]);
   var tg = {}; S.notes.forEach(function (n) { (n.tags || []).forEach(function (x) { tg[x] = (tg[x] || 0) + 1; }); });
   var tags = Object.keys(tg).sort();
   var acct = railStatus();
@@ -636,7 +637,7 @@ function route() {
   var h = (location.hash || "#home").slice(1);
   var parts = h.split("~"), v = parts[0], arg = parts[1];
   var m = $("#main");
-  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress", notes: "notes", note: "notes" }[v] || "home";
+  var tab = { home: "home", learn: "learn", lesson: "learn", builder: "learn", quiz: "learn", words: "write", speak: "speak", scene: "speak", think: "speak", impromptu: "speak", drills: "speak", write: "write", guides: "write", guide: "write", coach: "coach", settings: "settings", progress: "progress", history: "progress", notes: "notes", note: "notes", studio: "studio" }[v] || "home";
   shell(tab);
   var fn = VIEWS[v] || VIEWS.home;
   m.innerHTML = "";
@@ -666,6 +667,7 @@ VIEWS.home = function (m) {
     '<div class="think-strip">' + SW.thinkSteps.map(function (s) { return "<div><b>" + s.k + "</b><small>" + esc(s.d) + "</small></div>"; }).join("") + "</div></div>" +
 
     '<div class="section"><h2>Practise</h2><div class="grid">' +
+    tile("studio", "Spoken English guide", "Interactive daily routine and phrase bank for spoken English.") +
     tile("speak", "Speaking scenarios", "Presentations, meetings, office talk, friends, interviews, calls.") +
     tile("impromptu", "Impromptu trainer", "Random topic, a framework, a timer, instant feedback.") +
     tile("drills", "Brain drills", "Fast-thinking games for fluency and word recall.") +
@@ -848,7 +850,7 @@ VIEWS.words = function (m) {
 /* ---------- Speak hub ---------- */
 VIEWS.speak = function (m) {
   var html = top("Speaking", { eyebrow: "Practise out loud" }) +
-    '<div class="grid">' + tile("impromptu", "Impromptu trainer", "Random topic → think 15 s → speak 60 s → feedback.") + tile("think", "Thinking frameworks", "PREP, STAR, SCQA and more: structure before words.") + tile("drills", "Brain drills", "Rapid categories, describe-it, because-chains.") + tile("coach", "Role-play with AI", "Talk through any situation, live.") + '</div><div class="cols">';
+    '<div class="grid">' + tile("impromptu", "Impromptu trainer", "Random topic → think 15 s → speak 60 s → feedback.") + tile("think", "Thinking frameworks", "PREP, STAR, SCQA and more: structure before words.") + tile("drills", "Brain drills", "Rapid categories, describe-it, because-chains.") + tile("studio", "Spoken English guide", "Daily routine, phrase bank and progress.") + tile("coach", "Role-play with AI", "Talk through any situation, live.") + '</div><div class="cols">';
   SW.scenarioGroups.forEach(function (g) {
     var ss = SW.scenarios.filter(function (s) { return s.group === g.id; });
     html += '<div class="section"><h2>' + g.name + '</h2><div class="card">' + ss.map(function (s) {
@@ -1863,6 +1865,14 @@ VIEWS.notes = function (m, id) {
   };
 };
 VIEWS.note = VIEWS.notes;
+
+/* ---------- Spoken English interactive guide ---------- */
+VIEWS.studio = function (m) {
+  m.innerHTML = top("Spoken English", { eyebrow: "Interactive guide" }) +
+    '<div class="row tight" style="margin:-4px 0 10px"><span class="muted small">Daily routine, phrase bank and your progress. Your ticks are saved on this device.</span><a class="btn sm" href="spoken-english.html" target="_blank" rel="noopener">Open full screen ↗</a></div>' +
+    '<div class="studio-wrap"><iframe class="studio-frame" src="spoken-english.html" title="Spoken English interactive guide" loading="eager"></iframe></div>';
+  m.classList.add("wide-main"); cleanup.push(function () { m.classList.remove("wide-main"); });
+};
 
 /* ---------- Correction history ---------- */
 var HKINDS = [["all", "All"], ["writing", "Writing"], ["speaking", "Speaking"], ["coach", "Coach"], ["grammar", "Grammar"], ["quiz", "Quiz"]];
