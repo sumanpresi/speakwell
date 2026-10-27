@@ -1,16 +1,24 @@
 {
+  "id": "/speakwell/",
   "name": "Speakwell – English Coach",
   "short_name": "Speakwell",
   "description": "Practise English speaking and writing for work and social life.",
-  "start_url": "./index.html",
-  "scope": "./",
+  "start_url": "/speakwell/index.html",
+  "scope": "/speakwell/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
   "background_color": "#F4F5F0",
   "theme_color": "#2B4EFF",
+  "categories": ["education", "productivity"],
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    { "src": "screenshot-phone.png", "sizes": "800x1720", "type": "image/png", "form_factor": "narrow", "label": "Speakwell home" },
+    { "src": "screenshot-wide.png", "sizes": "1600x1000", "type": "image/png", "form_factor": "wide", "label": "Writing studio with notes" }
   ]
 }

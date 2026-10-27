@@ -23,6 +23,7 @@ var I = {
   file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
   folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
+  down: '<path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 011-1h10"/>'
 };
 function ico(n) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + I[n] + '</svg>'; }
@@ -491,6 +492,40 @@ function checkWriting(text) {
   return { issues: issues, words: wc, sentences: sents.length, avg: Math.round(wc / sc), flesch: Math.max(0, Math.min(100, flesch)), read: Math.max(1, Math.round(wc / 230)), tone: contractions > 2 ? "Conversational" : "Neutral / formal" };
 }
 
+/* ================= install as an app ================= */
+var installEvt = null;
+function isInstalled() { return (window.matchMedia && (matchMedia("(display-mode: standalone)").matches || matchMedia("(display-mode: minimal-ui)").matches)) || navigator.standalone === true; }
+window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); installEvt = e; $$("[data-install]").forEach(function (b) { b.hidden = false; }); });
+window.addEventListener("appinstalled", function () { installEvt = null; toast("Speakwell is installed. Open it from your home screen."); $$("[data-install]").forEach(function (b) { b.hidden = true; }); });
+function installSteps() {
+  var ua = navigator.userAgent, android = /Android/i.test(ua), ios = /iPhone|iPad|iPod/i.test(ua);
+  if (/SamsungBrowser/i.test(ua)) return ["Tap the menu (☰) at the bottom right.", "Tap <b>Add page to</b>, then <b>Home screen</b>.", "Tap <b>Add</b>. Speakwell appears on your home screen."];
+  if (ios) return ["Tap the <b>Share</b> button in Safari.", "Tap <b>Add to Home Screen</b>.", "Tap <b>Add</b>."];
+  if (android) return ["Tap Chrome's menu <b>⋮</b> (top right).", "Tap <b>Add to home screen</b> (or <b>Install app</b>).", "Choose <b>Install</b>, not \"Create shortcut\". If you only see \"Create shortcut\", see the tips below.", "Speakwell appears in your app drawer and home screen."];
+  return ["In Chrome or Edge, click the install icon at the right end of the address bar (a monitor with a down arrow).", "Or open the menu <b>⋮</b> → <b>Cast, save and share</b> → <b>Install page as app</b>.", "Click <b>Install</b>."];
+}
+function installHelpHTML() {
+  return '<div class="card stack" id="instHelp"><h3>Install Speakwell</h3><ol class="steps">' + installSteps().map(function (x) { return "<li><span>" + x + "</span></li>"; }).join("") + "</ol>" +
+    '<details class="small"><summary class="muted">Install option missing or only "Create shortcut"?</summary><ul class="points" style="margin-top:8px">' +
+    "<li>Open the app in <b>Chrome</b> (not inside WhatsApp, Gmail or another app's browser). Use the address <b>sumanpresi.github.io/speakwell/</b>.</li>" +
+    "<li>If Speakwell was installed before, Chrome shows <b>Open app</b> instead. Look for it in your app drawer, or uninstall it there first.</li>" +
+    "<li>Reload the page once while online, wait 10 seconds, then try the menu again. Chrome needs one full load to make the app installable.</li>" +
+    "<li>Still stuck: Chrome menu ⋮ → Settings → Site settings → All sites → sumanpresi.github.io → <b>Clear & reset</b>, then reopen the link. (This clears data on this phone only; your synced progress returns after you reconnect Google Drive.)</li></ul></details></div>";
+}
+function doInstall(btn) {
+  if (installEvt) {
+    var ev = installEvt; installEvt = null;
+    ev.prompt();
+    (ev.userChoice || Promise.resolve({})).then(function (c) { if (c.outcome !== "accepted") { installEvt = ev; toast("Install cancelled"); } });
+    return;
+  }
+  if (isInstalled()) { toast("You're already using the installed app."); return; }
+  var old = $("#instHelp"); if (old) { old.remove(); return; }
+  $("#main").insertAdjacentHTML("afterbegin", installHelpHTML());
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+document.addEventListener("click", function (e) { var b = e.target.closest("[data-install]"); if (b) { e.preventDefault(); doInstall(b); } });
+
 /* ================= router / shell ================= */
 var NAV = [["home", "Home", "home"], ["learn", "Learn", "learn"], ["speak", "Speak", "speak"], ["write", "Write", "write"], ["coach", "Coach", "coach"]];
 function shell(active) {
@@ -501,6 +536,7 @@ function shell(active) {
     NAV.map(function (n) { return '<button data-go="' + n[0] + '"' + (active === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + n[1] + "</button>"; }).join("") +
     '<button data-go="notes"' + (active === "notes" ? ' aria-current="page"' : "") + ">" + ico("note") + 'My notes' + (S.notes.length ? '<span class="rail-count">' + S.notes.length + "</span>" : "") + "</button>" +
     '<button data-go="progress"' + (active === "progress" ? ' aria-current="page"' : "") + ">" + ico("chart") + 'Progress</button><div class="spacer"></div>' +
+    (isInstalled() ? "" : '<button data-install class="rail-install">' + ico("down") + "Install app</button>") +
     '<button data-go="settings"' + (active === "settings" ? ' aria-current="page"' : "") + ">" + ico("gear") + "Settings</button>";
 }
 function logo() { return '<svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--accent)"/><path d="M9 20c3 3 11 3 14-1M10 12h4M18 12h4" stroke="var(--accent-ink)" stroke-width="2.6" stroke-linecap="round" fill="none"/></svg>'; }
@@ -572,6 +608,7 @@ VIEWS.home = function (m) {
     tile("notes", "My notes", (S.notes.length ? S.notes.length + " saved sentences" : "Your mistakes and corrections, side by side") + ", for revision.") +
     tile("history", "Correction history", (S.history.length ? S.history.length + " saved corrections and feedback" : "Every fix and piece of feedback, saved and synced") + ".") +
     "</div></div>" +
+    (isInstalled() ? "" : '<div class="section"><div class="notice info row" style="justify-content:space-between"><span><b>Install Speakwell</b> on this device to open it like an app and use it offline.</span><button class="btn sm primary" data-install>' + ico("down") + "Install app</button></div></div>") +
     (S.settings.apiKey ? "" : '<div class="section"><div class="notice info"><b>Turn on the AI coach.</b> Add your OpenAI API key and model in <a href="#settings">Settings</a>. Everything else in the app works without it, including offline.</div></div>') +
     (S.name ? "" : '<div class="section card"><label class="f" for="nm">What should I call you?<input id="nm" type="text" placeholder="Your first name" autocomplete="given-name"></label><div class="row" style="margin-top:10px"><button class="btn primary" id="nmSave">Save</button></div></div>');
   var b = $("#nmSave"); if (b) b.onclick = function () { S.name = $("#nm").value.trim(); save(); route(); };
@@ -1820,6 +1857,7 @@ VIEWS.settings = function (m) {
     '<label class="f" for="sRate">Speaking speed: <span id="rv">' + s.rate + '</span><input id="sRate" type="range" min="0.6" max="1.4" step="0.05" value="' + s.rate + '"></label>' +
     '<div class="row"><button class="btn" data-say="Hello! This is how I sound. Let\'s practise your English together.">' + ico("play") + "Test voice</button></div></div>" +
     '<div class="card stack"><h2>Appearance</h2><div class="row">' + ["system", "light", "dark"].map(function (t) { return '<button class="chip' + (s.theme === t ? " on" : "") + '" data-th="' + t + '">' + t + "</button>"; }).join("") + "</div></div>" +
+    '<div class="card stack"><h2>Install the app</h2>' + (isInstalled() ? '<p class="small"><b>Installed.</b> You are using Speakwell as an app.</p>' : '<p class="muted small">Opens full-screen from your home screen and works offline.</p><div class="row"><button class="btn primary" data-install>' + ico("down") + 'Install app</button></div>') + "</div>" +
     '<div class="card stack"><h2>Your data</h2><p class="muted small">Progress is saved on this device. Back it up before changing phones or clearing browser data.</p><div class="row"><button class="btn" id="sExp">Export backup</button><label class="btn" for="sImp">Import backup<input id="sImp" type="file" accept="application/json" hidden></label></div>' +
     '<hr class="sep"><div class="row"><button class="btn ghost" id="sReset" style="color:var(--bad)">Reset all progress</button><span id="sResetC" hidden class="row"><span class="small">This deletes XP, streaks and history' + (M.on ? ' on every synced device' : '') + '.</span><button class="btn sm" id="sResetY" style="color:var(--bad)">Yes, reset</button><button class="btn sm" id="sResetN">Cancel</button></span></div></div>' +
     '<p class="muted small">Speakwell works offline after the first visit. Speech-to-text uses your phone\'s recogniser, which usually needs a connection; when offline you can still record, replay and type.</p></div>';
