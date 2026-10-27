@@ -280,6 +280,11 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:4px 0}
 .an-better{padding:12px;border-radius:10px;background:var(--ok-soft);display:flex;flex-direction:column;gap:8px}
 .an-about summary{color:var(--muted);font-size:.9rem;margin-top:4px}
 body.an-open{overflow:hidden}
+#anPanel.inline{position:static;inset:auto;z-index:auto;margin-top:16px;scroll-margin-top:calc(12px + env(safe-area-inset-top,0px))}
+#anPanel.inline .an-scrim{display:none}
+#anPanel.inline .an-sheet{position:static;inset:auto;width:auto;max-height:none;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);background:var(--paper);padding-bottom:0}
+#anPanel.inline .an-head{padding:14px 16px 12px}
+#anPanel.inline .an-body{overflow:visible;padding:14px 16px 18px}
 </style>
 </head>
 <body>

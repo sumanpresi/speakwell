@@ -880,7 +880,7 @@ VIEWS.write = function (m) {
     '<textarea id="ed" class="editor" rows="10" placeholder="Write or paste your email, message, speech or paragraph here.">' + esc(draft) + "</textarea>" +
     '<div class="selbar" id="selbar" hidden><span class="muted small">Selected</span><span class="selq" id="selq"></span><button class="btn primary sm" id="selGo">' + ico("spark") + 'Analyse</button></div>' +
     '<div class="row"><button class="btn primary" id="chk">' + ico("ok") + 'Check (offline)</button><button class="btn" id="anB" title="Select a sentence, or place the cursor in one">' + ico("spark") + 'Analyse sentence</button><button class="btn" id="cpy">' + ico("copy") + 'Copy</button><button class="btn" data-say-ed>' + ico("play") + "Read aloud</button></div></div>" +
-    '<div id="chkOut"></div>' +
+    '<div id="anMount"></div><div id="chkOut"></div>' +
     '<div class="section card stack"><h2>AI rewrite</h2><p class="muted small">Pick what you want. Your draft stays as it is; the result appears below.</p><div class="row" id="aiOps">' +
     [["fix", "Fix grammar & explain"], ["formal", "More formal"], ["friendly", "More friendly"], ["short", "Shorter"], ["confident", "More confident"], ["speech", "Turn into a speech"]].map(function (o) { return '<button class="chip" data-op="' + o[0] + '">' + o[1] + "</button>"; }).join("") +
     '</div><div id="aiW" class="ai-out"></div></div>' +
@@ -940,7 +940,7 @@ VIEWS.write = function (m) {
   function openAn() {
     var s2 = selSentence();
     if (!s2 || s2.split(/\s+/).length < 2) { toast("Select a sentence, or tap inside one, then tap Analyse."); ed.focus(); return; }
-    SW.openAnalysis(s2, helper);
+    SW.openAnalysis(s2, helper, $("#anMount"));
   }
   document.addEventListener("selectionchange", selChange); cleanup.push(function () { document.removeEventListener("selectionchange", selChange); });
   ed.addEventListener("select", selChange); ed.addEventListener("keyup", selChange); ed.addEventListener("mouseup", selChange); ed.addEventListener("touchend", function () { setTimeout(selChange, 50); });

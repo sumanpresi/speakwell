@@ -104,16 +104,18 @@ function chip(name, st, sel) {
   return '<button class="tp tp-' + s + (sel ? " sel" : "") + '" data-tp="' + esc(name) + '">' + icon + esc(name) + "</button>";
 }
 
-SW.openAnalysis = function (sentence, h) {
+SW.openAnalysis = function (sentence, h, mount) {
   var panel = document.getElementById("anPanel");
+  if (panel && mount && panel.parentNode !== mount) { panel.remove(); panel = null; }
   if (!panel) {
-    panel = document.createElement("div"); panel.id = "anPanel";
+    panel = document.createElement("div"); panel.id = "anPanel"; if (mount) panel.className = "inline";
     panel.innerHTML = '<div class="an-scrim" data-anclose></div><aside class="an-sheet" role="dialog" aria-modal="true" aria-labelledby="anTitle"><header class="an-head"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg><h2 id="anTitle">Sentence analysis</h2><span class="an-model" id="anModel"></span><button class="icon-btn" id="anRefresh" aria-label="Analyse again"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7"/></svg></button><button class="icon-btn" data-anclose aria-label="Close"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header><div class="an-body" id="anBody"></div></aside>';
-    document.body.appendChild(panel);
+    (mount || document.body).appendChild(panel);
     panel.addEventListener("click", function (e) { if (e.target.closest("[data-anclose]")) SW.closeAnalysis(); });
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && document.getElementById("anPanel") && !panel.hidden) SW.closeAnalysis(); });
+    if (!mount) document.addEventListener("keydown", function (e) { if (e.key === "Escape" && document.getElementById("anPanel") && !panel.hidden) SW.closeAnalysis(); });
   }
-  panel.hidden = false; document.body.classList.add("an-open");
+  panel.hidden = false; if (!mount) document.body.classList.add("an-open");
+  if (mount) setTimeout(function () { panel.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
   var body = document.getElementById("anBody");
   document.getElementById("anModel").textContent = h.S().settings.model;
   var state = { sel: "Sentence Structure" };
