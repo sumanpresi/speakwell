@@ -11,7 +11,30 @@
 @media(max-width:460px){.hero{grid-template-columns:1fr}.hero-art{display:none}.levels{gap:4px}.level{font-size:11px}.level span{font-size:10px}.flow{grid-template-columns:minmax(0,1fr) 12px minmax(0,1fr) 12px minmax(0,1fr);gap:1px}.arrow{font-size:15px}.stage{padding:11px 4px;min-height:227px;border-radius:11px;gap:7px}.stage-name{font-size:13px}.stage-question{font-size:10px}.stage-answer{font-size:12px}.spoken p{font-size:15px}.chip{font-size:12px;padding:9px 11px}.hide-on-mobile{display:none}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 @media print{body{background:white}.shell{max-width:100%;padding:0}.panel,.hero{box-shadow:none}.controls,.practice-area,.speech-actions,.button-row,.top-actions,.footer{display:none!important}.layout{grid-template-columns:1fr}.stage{min-height:150px}}
+
+.ai-note{font-size:12px;color:var(--muted);line-height:1.5;margin:10px 0}
+.ai-results{margin-top:15px;padding:14px;background:#f7fcff;border:1px solid #b7d3e3;border-radius:15px}
+.ai-results[hidden]{display:none}.ai-results h3{font-size:19px;margin:0 0 7px}.ai-explain{font-size:12px;color:var(--muted);margin-bottom:12px}
+.ai-pair{border:1px solid #c6d9e2;border-radius:13px;overflow:hidden;margin-bottom:13px;background:white}
+.ai-pair h4{margin:0;padding:9px 12px;background:#e5f3fb;border-bottom:1px solid #c6d9e2}
+.ai-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.ai-cell{padding:12px;min-width:0}.ai-cell b{font-size:11px;color:#546677;letter-spacing:.05em;text-transform:uppercase}
+.ai-cell p{font-size:14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0}
+.ai-corrected{border-left:1px solid #c6d9e2;background:#f2fcf5}
+.ai-highlight{background:#b7ebc8;border-radius:3px;padding:1px 2px;color:#194e30}
+.ai-issues{border-top:1px dashed #c6d9e2;padding:10px 12px;font-size:13px}
+.ai-issues ul{margin:6px 0 0;padding-left:18px}.ai-issues li{margin:5px 0}
+.ai-change{color:#526b7b;font-size:12px;margin:3px 0}
+.ai-summary{background:#e4f5eb;border:1px solid #b2d5c3;padding:13px;border-radius:12px}
+.ai-summary h4{margin:0 0 8px}.ai-summary p{font-size:13px;margin:7px 0;line-height:1.5}
+.ai-natural{background:white;padding:12px;border-radius:10px;border:1px solid #b2d5c3;margin:12px 0}
+.ai-natural p{font-size:15px}
+.ai-actions{display:flex;gap:8px;flex-wrap:wrap}.ai-actions button{padding:9px 13px;border:1px solid #b2c7d0;border-radius:9px;background:white;font-size:12px;font-weight:800}
+.ai-error{padding:12px;border-radius:10px;background:#fff0e9;border:1px solid #e6bba9;color:#8b352c;font-size:13px}
+@media(max-width:490px){.ai-columns{grid-template-columns:1fr}.ai-corrected{border-left:0;border-top:1px solid #c6d9e2}.ai-results{padding:9px}}
+
 </style>
+<script defer src="think-ai-review.js"></script>
 </head>
 <body>
 <main class="shell">
