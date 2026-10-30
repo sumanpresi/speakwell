@@ -30,9 +30,10 @@ button,input,select{font:inherit}button{cursor:pointer;color:inherit}button:focu
 .thinking-actions .action[aria-pressed="true"]{background:var(--yellow);box-shadow:1px 1px 0 var(--ink)}
 .thinking-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;font-size:13px}
 .thinking-toolbar a{color:var(--ink);font-weight:800;text-underline-offset:3px}
-.thinking-frame{display:block;width:100%;height:1160px;min-height:560px;border:2px solid var(--ink);background:#fff;border-radius:14px}
-@media(max-width:520px){.thinking-actions .action{min-width:0;padding:9px 8px;font-size:12px}.thinking-frame{height:1050px}}
+.thinking-frame{display:block;width:100%;height:850px;min-height:400px;border:2px solid var(--ink);background:#fff;border-radius:14px;overflow:hidden}
+@media(max-width:520px){.thinking-actions .action{min-width:0;padding:9px 8px;font-size:12px}.thinking-frame{height:760px}}
 </style>
+<script defer src="speakwell-auto-scroll.js"></script>
 </head>
 <body>
 <div class="app">
@@ -145,11 +146,11 @@ return `<div class='section-top'><div><h2 class='hand'>🧠 Think & Speak</h2><p
 <section class='paper-card' aria-label='Interactive thinking and speaking practice'><p class='thinking-intro'>Practise WHY → WHAT → NEXT for introducing topics, and POINT → REASON → NEXT for making suggestions. Move from easy conversations to difficult meeting questions.</p>
 <div class='thinking-actions' role='group' aria-label='Choose a thinking tool'><button type='button' class='action' data-think-tool='flow' aria-pressed='${thinkTool==='flow'}'>① One-Glance Flowchart</button><button type='button' class='action' data-think-tool='learn' aria-pressed='${thinkTool==='learn'}'>② Complete Learning Guide</button></div>
 <div class='thinking-toolbar'><span>Choose a situation, then practise aloud without memorising full sentences.</span><a id='thinking-full' href='${file}' target='_blank' rel='noopener'>↗ Open full screen</a></div>
-<iframe class='thinking-frame' src='${file}' title='${thinkTool==='flow'?'One-glance speaking flowchart':'Complete speaking learning infographic'}' loading='eager' allow='autoplay'></iframe>
+<iframe class='thinking-frame' data-speakwell-autosize scrolling='no' src='${file}' title='${thinkTool==='flow'?'One-glance speaking flowchart':'Complete speaking learning infographic'}' loading='eager' allow='autoplay'></iframe>
 <p class='tiny' style='margin-top:12px'>All lessons work offline once the latest Speakwell update has been downloaded. Browser voice playback depends on installed voices.</p></section>`;
 }
-function render(scroll=false){nav();updateProgress();el.innerHTML=page==='map'?mapView():page==='builder'?builderView():page==='practice'?practiceView():thinkingView();if(scroll)window.scrollTo({top:document.querySelector('.main-nav').offsetTop-4,behavior:'smooth'});}
-function selectTopic(k){if(!L[k])return;selected=k;quizAnswer=null;let target=document.getElementById('lesson-target');target.innerHTML=lessonView();document.querySelectorAll('.topic').forEach(b=>{b.classList.toggle('active',b.dataset.topic===k);b.setAttribute('aria-pressed',b.dataset.topic===k?'true':'false');});target.scrollIntoView({behavior:'smooth',block:'start'});}
+function render(scroll=false){nav();updateProgress();el.innerHTML=page==='map'?mapView():page==='builder'?builderView():page==='practice'?practiceView():thinkingView();if(scroll){const target=document.querySelector('.main-nav');setTimeout(()=>{if(window.speakwellScrollTo)window.speakwellScrollTo(target);else target.scrollIntoView({behavior:'smooth',block:'start'});},120);}}
+function selectTopic(k){if(!L[k])return;selected=k;quizAnswer=null;let target=document.getElementById('lesson-target');target.innerHTML=lessonView();document.querySelectorAll('.topic').forEach(b=>{b.classList.toggle('active',b.dataset.topic===k);b.setAttribute('aria-pressed',b.dataset.topic===k?'true':'false');});if(window.speakwellScrollTo)window.speakwellScrollTo(target);else target.scrollIntoView({behavior:'smooth',block:'start'});}
 function speak(s){if(!('speechSynthesis' in window)){alert('Speech playback is not available in this browser. You can still read the sentence aloud.');return;}try{window.speechSynthesis.cancel();let u=new SpeechSynthesisUtterance(s);u.lang='en-IN';u.rate=.83;u.pitch=1;window.speechSynthesis.speak(u);}catch(e){alert('Audio is not available here. Read the sentence aloud instead.');}}
 document.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;
 if(b.dataset.page){page=b.dataset.page;render(true);return;}

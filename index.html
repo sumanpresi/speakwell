@@ -486,6 +486,7 @@ details.more > summary svg{width:18px;height:18px}
 .studio-wrap{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:#fbf7ee}
 .studio-frame{display:block;width:100%;height:calc(100dvh - 190px - env(safe-area-inset-bottom,0px));min-height:480px;border:0}
 @media (min-width:760px){.studio-frame{height:calc(100dvh - 120px)}}
+.studio-frame[data-speakwell-autosize]{height:850px;min-height:380px;overflow:hidden}
 </style>
 </head>
 <body>
@@ -497,6 +498,7 @@ details.more > summary svg{width:18px;height:18px}
 <script src="data-grammar.js"></script>
 <script src="data-speak.js"></script>
 <script src="data-write.js"></script>
+<script src="speakwell-auto-scroll.js"></script>
 <script src="app.js"></script>
 <script src="analysis.js"></script>
 </body>

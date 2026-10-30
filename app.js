@@ -1924,7 +1924,7 @@ VIEWS.note = VIEWS.notes;
 function embedView(m, file, title, eyebrow, desc, bg) {
   m.innerHTML = top(title, { eyebrow: eyebrow }) +
     '<div class="row tight" style="margin:-4px 0 10px"><span class="muted small">' + desc + (M.on ? " Progress syncs with Google Drive." : "") + '</span><a class="btn sm" href="' + file + '" target="_blank" rel="noopener">Open full screen ↗</a></div>' +
-    '<div class="studio-wrap" style="background:' + bg + '"><iframe class="studio-frame" src="' + file + '" title="' + esc(title) + '" loading="eager"></iframe></div>';
+    '<div class="studio-wrap" style="background:' + bg + '"><iframe class="studio-frame"' + (file === "sentence-sketchbook.html" ? ' data-speakwell-autosize scrolling="no"' : '') + ' src="' + file + '" title="' + esc(title) + '" loading="eager"></iframe></div>';
   m.classList.add("wide-main"); cleanup.push(function () { m.classList.remove("wide-main"); });
 }
 VIEWS.studio = function (m) { embedView(m, "spoken-english.html", "Spoken English", "Interactive guide", "Daily routine, phrase bank and your progress.", "#fbf7ee"); };

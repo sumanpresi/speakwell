@@ -46,7 +46,7 @@
       '<div class="ai-natural"><b>Natural spoken version</b><p>'+esc(lastSpoken)+'</p></div>'+
       '<div class="ai-actions"><button type="button" id="aiCopySpeech">Copy corrected speech</button><button type="button" id="aiListenSpeech">🔊 Listen</button></div></div>'+
       '<p class="ai-note">AI suggestions can be imperfect. Use them to practise, not as a final judgement.</p>';
-    panel.innerHTML=html;panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+    panel.innerHTML=html;panel.hidden=false;(window.speakwellScrollTo?window.speakwellScrollTo(panel):panel.scrollIntoView({behavior:'smooth',block:'nearest'}));
   }
   async function getFeedback(answers,labels){
     let settings={};
