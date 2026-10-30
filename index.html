@@ -501,11 +501,42 @@ details.more > summary svg{width:18px;height:18px}
 @media(max-width:759px){body.sketch-shortcuts-active .main{padding-bottom:calc(222px + env(safe-area-inset-bottom,0px))}}
 @media(min-width:760px){.sketch-quicknav{display:none!important}}
 
+
+/* Resizable navigation on the Fold inner screen and desktop; cover screen unaffected. */
+.rail-resizer{display:none}
+@media (min-width:760px){
+  .app{grid-template-columns:var(--rail-width,256px) 12px minmax(0,1fr)}
+  .app.rail-off{grid-template-columns:0 0 minmax(0,1fr)}
+  .rail-resizer{
+    display:flex;position:sticky;top:0;height:100dvh;align-self:start;z-index:9;
+    align-items:center;justify-content:center;touch-action:none;
+    cursor:col-resize;background:var(--sunk);border-left:1px solid var(--line);
+    border-right:1px solid var(--line);outline-offset:-2px
+  }
+  .rail-resizer-grip{
+    display:flex;align-items:center;justify-content:center;gap:3px;
+    width:10px;height:68px;border-radius:99px;background:var(--surface);
+    border:1px solid var(--line);box-shadow:0 1px 5px rgba(0,0,0,.10)
+  }
+  .rail-resizer-grip::before{
+    content:"";width:3px;height:34px;border-radius:99px;
+    background:var(--muted);opacity:.7
+  }
+  .rail-resizer:hover .rail-resizer-grip,
+  .rail-resizer:focus-visible .rail-resizer-grip,
+  .app.sidebar-dragging .rail-resizer-grip{background:var(--accent-soft);border-color:var(--accent)}
+  .rail-resizer:focus-visible{outline:3px solid var(--accent)}
+  .app.sidebar-dragging{transition:none!important}
+  .app.sidebar-dragging,.app.sidebar-dragging *{user-select:none!important}
+  .app.rail-off .rail-resizer{visibility:hidden;pointer-events:none}
+}
+
 </style>
 </head>
 <body>
 <div class="app">
   <nav class="rail" id="rail" aria-label="Main"></nav>
+  <div id="railResizer" class="rail-resizer" role="separator" tabindex="0" aria-label="Resize left navigation sidebar" aria-orientation="vertical" aria-valuemin="176" aria-valuemax="520" aria-valuenow="256" title="Drag left or right to resize. Double-tap to reset. Use arrow keys to adjust."><span class="rail-resizer-grip" aria-hidden="true"></span></div>
   <main class="main" id="main" tabindex="-1"></main>
 </div>
 
@@ -522,6 +553,7 @@ details.more > summary svg{width:18px;height:18px}
 <script src="speakwell-auto-scroll.js"></script>
 <script src="sketch-quick-nav.js"></script>
 <script src="app.js"></script>
+<script src="rail-resize.js"></script>
 <script src="analysis.js"></script>
 </body>
 </html>
