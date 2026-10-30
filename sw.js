@@ -1,5 +1,5 @@
 /* Speakwell service worker: caches the app so it works offline */
-const CACHE = "speakwell-v23";
+const CACHE = "speakwell-v24";
 const CORE = ["./", "index.html", "app.js", "data-grammar.js", "data-speak.js", "data-write.js", "analysis.js", "manifest.json", "icon.svg", "icon-192.png", "icon-512.png", "icon-maskable-192.png", "icon-maskable-512.png", "spoken-english.html", "sentence-sketchbook.html", "01_one_glance_speaking_flowchart.html", "02_complete_speaking_learning_infographic.html", "think-ai-review.js", "speakwell-auto-scroll.js"];
 self.addEventListener("install", e => {
   // cache each file on its own so one failure can't block installing the app

@@ -604,9 +604,16 @@ function railOff() { try { return localStorage.getItem("speakwell.railoff") === 
 function applyRail() { var a = $(".app"); if (a) a.classList.toggle("rail-off", railOff()); }
 function shell(active) {
   var bottom = active === "notes" ? "write" : active;
-  var t = NAV.map(function (n) { return '<button class="tab" data-go="' + n[0] + '"' + (bottom === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + n[1] + "</button>"; }).join("");
+  // All eight primary sections remain directly accessible on narrow phone screens.
+  var navItems = NAV.concat([["studio", "Spoken English", "studio"], ["sketch", "Sentence Sketchbook", "sketch"], ["progress", "Progress", "chart"]]);
+  var mobileNames = { sketch: "Sketchbook" };
+  var t = navItems.map(function (n) {
+    var name = mobileNames[n[0]] || n[1];
+    return '<button class="tab" type="button" data-go="' + n[0] + '" aria-label="' + n[1] + '"' +
+      (bottom === n[0] ? ' aria-current="page"' : "") + '>' + ico(n[2]) +
+      '<span class="tab-label">' + name + '</span></button>';
+  }).join("");
   $("#tabs").innerHTML = t;
-  var navItems = NAV.slice(0, 5).concat([["studio", "Spoken English", "studio"], ["sketch", "Sentence Sketchbook", "sketch"], ["progress", "Progress", "chart"]]);
   var tg = {}; S.notes.forEach(function (n) { (n.tags || []).forEach(function (x) { tg[x] = (tg[x] || 0) + 1; }); });
   var tags = Object.keys(tg).sort();
   var acct = railStatus();
