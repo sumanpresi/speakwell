@@ -531,12 +531,50 @@ details.more > summary svg{width:18px;height:18px}
   .app.rail-off .rail-resizer{visibility:hidden;pointer-events:none}
 }
 
+
+/* Fold inner screen: compact icon rail plus a restrained readable sidebar. */
+@media(min-width:760px){
+  .app.rail-compact .rail{padding-left:6px;padding-right:6px}
+  .app.rail-compact .rail .brand{
+    display:flex;flex-direction:column;justify-content:center;gap:8px;
+    padding:4px 0 13px;align-items:center
+  }
+  .app.rail-compact .rail .brand b{display:none}
+  .app.rail-compact .rail .brand > :first-child{flex:none}
+  .app.rail-compact .rail .rail-toggle{
+    display:flex;justify-content:center;align-items:center;width:34px;height:32px;padding:0;
+    flex:none
+  }
+  .app.rail-compact .rail-nav{gap:3px}
+  .app.rail-compact .rail button.rn-nav{
+    width:100%;min-height:42px;padding:9px 0;gap:0;
+    display:flex;justify-content:center;align-items:center
+  }
+  .app.rail-compact .rail button.rn-nav svg{width:21px;height:21px;flex:none}
+  .app.rail-compact .rail button.rn-nav > span{display:none}
+  .app.rail-compact .rail .rs{display:none}
+  .app.rail-compact .rail-scroll{margin:0 -2px;padding:0 2px}
+  .app.rail-compact .rail-foot{align-items:center}
+  .app.rail-compact .rail-foot .rn-nav{width:100%}
+  .app.rail-compact .rail button.rf-status{
+    min-height:42px;width:100%;justify-content:center;padding:9px 0;gap:0
+  }
+  .app.rail-compact .rail .rf-status > span{display:none}
+  .app.rail-compact .rail .rf-status .dot{height:12px;width:12px}
+  .rail-resizer{position:sticky;touch-action:none}
+  .rail-resizer::after{
+    content:"";position:absolute;top:0;bottom:0;left:-4px;right:-4px;
+    touch-action:none;cursor:col-resize
+  }
+  .rail-resizer-grip{pointer-events:none}
+}
+
 </style>
 </head>
 <body>
 <div class="app">
   <nav class="rail" id="rail" aria-label="Main"></nav>
-  <div id="railResizer" class="rail-resizer" role="separator" tabindex="0" aria-label="Resize left navigation sidebar" aria-orientation="vertical" aria-valuemin="176" aria-valuemax="520" aria-valuenow="256" title="Drag left or right to resize. Double-tap to reset. Use arrow keys to adjust."><span class="rail-resizer-grip" aria-hidden="true"></span></div>
+  <div id="railResizer" class="rail-resizer" role="separator" tabindex="0" aria-label="Resize left navigation sidebar" aria-orientation="vertical" aria-valuemin="72" aria-valuemax="320" aria-valuenow="256" title="Drag left or right to resize. Double-tap to reset. Use arrow keys to adjust."><span class="rail-resizer-grip" aria-hidden="true"></span></div>
   <main class="main" id="main" tabindex="-1"></main>
 </div>
 

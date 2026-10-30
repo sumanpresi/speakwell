@@ -620,18 +620,18 @@ function shell(active) {
   $("#rail").innerHTML =
     '<div class="brand">' + logo() + '<b>Speakwell</b><button class="rail-toggle" data-rail-toggle title="Hide sidebar" aria-label="Hide sidebar">' + ico("panel") + "</button></div>" +
     '<div class="rail-scroll">' +
-    '<div class="rail-nav">' + navItems.map(function (n) { return '<button class="rn-nav" data-go="' + n[0] + '"' + (active === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + "<span>" + n[1] + "</span></button>"; }).join("") + "</div>" +
+    '<div class="rail-nav">' + navItems.map(function (n) { return '<button class="rn-nav" data-go="' + n[0] + '" aria-label="' + n[1] + '" title="' + n[1] + '"' + (active === n[0] ? ' aria-current="page"' : "") + ">" + ico(n[2]) + "<span>" + n[1] + "</span></button>"; }).join("") + "</div>" +
     railSection("notes", "Notes", S.notes.length, '<button class="rs-add" data-go="write" title="New draft" aria-label="New draft">+</button>', railNotes(active)) +
     (tags.length ? railSection("tags", "Tags", "", "", '<div class="rt-list">' + tags.map(function (x) { return '<button class="rt-item' + (NS.tag === x ? " on" : "") + '" data-ntag="' + esc(x) + '"><span class="rt-hash">#</span><span class="rn-t">' + esc(x) + '</span><span class="rt-n">' + tg[x] + "</span></button>"; }).join("") + "</div>") : "") +
     "</div>" +
-    '<div class="rail-foot">' + acct + (isInstalled() ? "" : '<button class="rn-nav rail-install" data-install>' + ico("down") + "<span>Install app</span></button>") +
-    '<button class="rn-nav" data-go="settings"' + (active === "settings" ? ' aria-current="page"' : "") + ">" + ico("gear") + "<span>Settings</span></button></div>";
+    '<div class="rail-foot">' + acct + (isInstalled() ? "" : '<button class="rn-nav rail-install" data-install title="Install app" aria-label="Install app">' + ico("down") + "<span>Install app</span></button>") +
+    '<button class="rn-nav" data-go="settings" title="Settings" aria-label="Settings"' + (active === "settings" ? ' aria-current="page"' : "") + ">" + ico("gear") + "<span>Settings</span></button></div>";
   applyRail();
   setTimeout(filterRail, 0);
 }
 function railStatus() {
-  return !M.on ? '<button class="rf-status" data-go="settings"><i class="dot off"></i><span><b>Google Drive</b><small>Not connected · tap to set up</small></span></button>'
-    : '<button class="rf-status" data-sync title="Sync now"><i class="dot' + (M.err ? " err" : tokenValid() && !Sync.dirty ? "" : " off") + '"></i><span><b>' + (M.err ? "Sync problem" : tokenValid() ? (Sync.dirty ? "Saving to Drive…" : "Google Drive connected") : "Tap to sync") + "</b><small>" + esc(M.hint || (M.last ? "Last synced " + ago(M.last) : "Google Drive")) + "</small></span></button>";
+  return !M.on ? '<button class="rf-status" data-go="settings" aria-label="Configure Google Drive" title="Configure Google Drive"><i class="dot off"></i><span><b>Google Drive</b><small>Not connected · tap to set up</small></span></button>'
+    : '<button class="rf-status" data-sync title="Sync now" aria-label="Sync Google Drive"><i class="dot' + (M.err ? " err" : tokenValid() && !Sync.dirty ? "" : " off") + '"></i><span><b>' + (M.err ? "Sync problem" : tokenValid() ? (Sync.dirty ? "Saving to Drive…" : "Google Drive connected") : "Tap to sync") + "</b><small>" + esc(M.hint || (M.last ? "Last synced " + ago(M.last) : "Google Drive")) + "</small></span></button>";
 }
 function railSection(id, label, count, extra, body) {
   var open = RSEC[id] !== false;

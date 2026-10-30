@@ -5,26 +5,33 @@ const app=document.querySelector('.app');
 const handle=document.getElementById('railResizer');
 if(!app||!handle)return;
 const KEY='speakwell.sidebar.width';
-const DEFAULT=256,MIN=176,MAX=520,CONTENT_MIN=338,HANDLE=12;
+const DEFAULT=256,MIN=72,MAX=320,CONTENT_MIN=360,HANDLE=12,COMPACT=72,SNAP_AT=156,NORMAL_MIN=190;
 let preferred=DEFAULT;
 try{
   const stored=Number(localStorage.getItem(KEY));
-  if(Number.isFinite(stored)&&stored>=MIN&&stored<=MAX)preferred=stored;
+  if(Number.isFinite(stored)&&stored>=MIN&&stored<=520)preferred=stored;
 }catch(e){}
 let current=DEFAULT,drag=null;
 const isWide=()=>window.matchMedia('(min-width:760px)').matches;
 const maxWidth=()=>Math.max(MIN,Math.min(MAX,window.innerWidth-CONTENT_MIN-HANDLE));
-const clamp=n=>Math.round(Math.max(MIN,Math.min(maxWidth(),n)));
+const clamp=n=>{
+  let width=Math.max(MIN,Math.min(maxWidth(),n));
+  // Avoid half-collapsed states with clipped menu labels.
+  if(width<SNAP_AT)return COMPACT;
+  if(width<NORMAL_MIN)return NORMAL_MIN;
+  return Math.round(width);
+};
 function update(value){
   current=clamp(value);
+  app.classList.toggle('rail-compact',isWide()&&current===COMPACT);
   app.style.setProperty('--rail-width',current+'px');
   handle.setAttribute('aria-valuemin',String(MIN));
   handle.setAttribute('aria-valuemax',String(maxWidth()));
   handle.setAttribute('aria-valuenow',String(current));
-  handle.setAttribute('aria-valuetext',current+' pixels');
+  handle.setAttribute('aria-valuetext',current===COMPACT?'Collapsed: icons only':current+' pixels');
 }
 function save(value){
-  preferred=Math.round(Math.max(MIN,Math.min(MAX,value)));
+  preferred=clamp(value);
   try{localStorage.setItem(KEY,String(preferred));}catch(e){}
 }
 function finish(e){
@@ -53,8 +60,8 @@ handle.addEventListener('lostpointercapture',e=>{
 handle.addEventListener('keydown',e=>{
   if(!isWide()||app.classList.contains('rail-off'))return;
   let next=null,step=e.shiftKey?40:16;
-  if(e.key==='ArrowLeft')next=current-step;
-  if(e.key==='ArrowRight')next=current+step;
+  if(e.key==='ArrowLeft')next=current<=NORMAL_MIN?COMPACT:current-step;
+  if(e.key==='ArrowRight')next=current===COMPACT?NORMAL_MIN:current+step;
   if(e.key==='Home')next=MIN;
   if(e.key==='End')next=maxWidth();
   if(next===null)return;
