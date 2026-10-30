@@ -490,6 +490,17 @@ details.more > summary svg{width:18px;height:18px}
 .studio-frame{display:block;width:100%;height:calc(100dvh - 190px - env(safe-area-inset-bottom,0px));min-height:480px;border:0}
 @media (min-width:760px){.studio-frame{height:calc(100dvh - 120px)}}
 .studio-frame[data-speakwell-autosize]{height:850px;min-height:380px;overflow:hidden}
+
+/* Sketchbook contextual section navigation, fixed above the main 8-tab mobile dock */
+.sketch-quicknav[hidden]{display:none!important}
+.sketch-quicknav{position:fixed;left:0;right:0;bottom:calc(123px + env(safe-area-inset-bottom,0px));z-index:21;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:7px max(8px,env(safe-area-inset-right,0px)) 7px max(8px,env(safe-area-inset-left,0px));background:var(--surface);border-top:1px solid var(--line);border-bottom:1px solid var(--line);box-shadow:0 -4px 15px rgba(18,30,45,.06)}
+.sketch-quickbtn{min-width:0;min-height:41px;display:flex;align-items:center;justify-content:center;gap:4px;background:var(--paper);color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:5px 3px;font:700 .75rem/1.15 var(--mono);cursor:pointer;white-space:nowrap}
+.sketch-quickbtn[aria-pressed="true"]{background:var(--mark);color:var(--ink);border-color:#d1ae36;box-shadow:inset 0 -2px rgba(108,82,21,.12)}
+.sketch-quickbtn:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+@media(max-width:359px){.sketch-quicknav{gap:3px}.sketch-quickbtn{font-size:.69rem;gap:2px}}
+@media(max-width:759px){body.sketch-shortcuts-active .main{padding-bottom:calc(222px + env(safe-area-inset-bottom,0px))}}
+@media(min-width:760px){.sketch-quicknav{display:none!important}}
+
 </style>
 </head>
 <body>
@@ -497,11 +508,19 @@ details.more > summary svg{width:18px;height:18px}
   <nav class="rail" id="rail" aria-label="Main"></nav>
   <main class="main" id="main" tabindex="-1"></main>
 </div>
+
+<nav class="sketch-quicknav" id="sketchQuickNav" aria-label="Quick access to Sentence Sketchbook sections" hidden>
+  <button type="button" class="sketch-quickbtn" data-sketch-section="map" aria-pressed="true" aria-label="Topic map">🗺 Map</button>
+  <button type="button" class="sketch-quickbtn" data-sketch-section="builder" aria-pressed="false" aria-label="Build a sentence">🧩 Build</button>
+  <button type="button" class="sketch-quickbtn" data-sketch-section="practice" aria-pressed="false" aria-label="Speak and recall">🎙 Speak</button>
+  <button type="button" class="sketch-quickbtn" data-sketch-section="thinking" aria-pressed="false" aria-label="Think and Speak">🧠 Think</button>
+</nav>
 <nav class="tabs" id="tabs" aria-label="Main"></nav>
 <script src="data-grammar.js"></script>
 <script src="data-speak.js"></script>
 <script src="data-write.js"></script>
 <script src="speakwell-auto-scroll.js"></script>
+<script src="sketch-quick-nav.js"></script>
 <script src="app.js"></script>
 <script src="analysis.js"></script>
 </body>

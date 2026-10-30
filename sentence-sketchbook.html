@@ -32,6 +32,7 @@ button,input,select{font:inherit}button{cursor:pointer;color:inherit}button:focu
 .thinking-toolbar a{color:var(--ink);font-weight:800;text-underline-offset:3px}
 .thinking-frame{display:block;width:100%;height:850px;min-height:400px;border:2px solid var(--ink);background:#fff;border-radius:14px;overflow:hidden}
 @media(max-width:520px){.thinking-actions .action{min-width:0;padding:9px 8px;font-size:12px}.thinking-frame{height:760px}}
+@media(max-width:759px){html.speakwell-embedded .main-nav{display:none}}
 </style>
 <script defer src="speakwell-auto-scroll.js"></script>
 </head>
@@ -63,6 +64,7 @@ button,input,select{font:inherit}button{cursor:pointer;color:inherit}button:focu
 </div>
 <script>
 'use strict';
+if(window.parent!==window){try{if(window.parent.location.origin===location.origin)document.documentElement.classList.add('speakwell-embedded')}catch(e){}}
 const L={
 verbs:['🏃','An action or a state.','WHO + VERB + rest','The committee reviewed the draft.','The committee reviewing the draft.','Ask: What did the subject do? A statement usually needs a finite verb.','Use reviewed for completed work.'],
 nouns:['📦','A name for a person, place, thing, or idea.','ARTICLE + NOUN (often)','We submitted the report.','We submitted report.','Think: What am I talking about? Report, officer, Kolkata and idea are nouns.','Many singular countable nouns need a determiner.'],
@@ -149,9 +151,16 @@ return `<div class='section-top'><div><h2 class='hand'>🧠 Think & Speak</h2><p
 <iframe class='thinking-frame' data-speakwell-autosize scrolling='no' src='${file}' title='${thinkTool==='flow'?'One-glance speaking flowchart':'Complete speaking learning infographic'}' loading='eager' allow='autoplay'></iframe>
 <p class='tiny' style='margin-top:12px'>All lessons work offline once the latest Speakwell update has been downloaded. Browser voice playback depends on installed voices.</p></section>`;
 }
-function render(scroll=false){nav();updateProgress();el.innerHTML=page==='map'?mapView():page==='builder'?builderView():page==='practice'?practiceView():thinkingView();if(scroll){const target=document.querySelector('.main-nav');setTimeout(()=>{if(window.speakwellScrollTo)window.speakwellScrollTo(target);else target.scrollIntoView({behavior:'smooth',block:'start'});},120);}}
+function notifySketchSection(){if(window.parent!==window)window.parent.postMessage({type:'speakwell:sketch-selected',page:page},location.origin)}
+function render(scroll=false){nav();updateProgress();el.innerHTML=page==='map'?mapView():page==='builder'?builderView():page==='practice'?practiceView():thinkingView();notifySketchSection();if(scroll){const target=document.getElementById('content');setTimeout(()=>{if(window.speakwellScrollTo)window.speakwellScrollTo(target);else target.scrollIntoView({behavior:'smooth',block:'start'});},120);}}
 function selectTopic(k){if(!L[k])return;selected=k;quizAnswer=null;let target=document.getElementById('lesson-target');target.innerHTML=lessonView();document.querySelectorAll('.topic').forEach(b=>{b.classList.toggle('active',b.dataset.topic===k);b.setAttribute('aria-pressed',b.dataset.topic===k?'true':'false');});if(window.speakwellScrollTo)window.speakwellScrollTo(target);else target.scrollIntoView({behavior:'smooth',block:'start'});}
 function speak(s){if(!('speechSynthesis' in window)){alert('Speech playback is not available in this browser. You can still read the sentence aloud.');return;}try{window.speechSynthesis.cancel();let u=new SpeechSynthesisUtterance(s);u.lang='en-IN';u.rate=.83;u.pitch=1;window.speechSynthesis.speak(u);}catch(e){alert('Audio is not available here. Read the sentence aloud instead.');}}
+window.addEventListener('message',event=>{
+ if(event.source!==window.parent||event.origin!==location.origin)return;
+ const msg=event.data;
+ if(!msg||msg.type!=='speakwell:sketch-select'||!['map','builder','practice','thinking'].includes(msg.page))return;
+ page=msg.page;render(true);
+});
 document.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;
 if(b.dataset.page){page=b.dataset.page;render(true);return;}
 if(b.dataset.thinkTool){thinkTool=b.dataset.thinkTool==='learn'?'learn':'flow';render();return;}

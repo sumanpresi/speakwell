@@ -1,6 +1,6 @@
 /* Speakwell service worker: caches the app so it works offline */
-const CACHE = "speakwell-v24";
-const CORE = ["./", "index.html", "app.js", "data-grammar.js", "data-speak.js", "data-write.js", "analysis.js", "manifest.json", "icon.svg", "icon-192.png", "icon-512.png", "icon-maskable-192.png", "icon-maskable-512.png", "spoken-english.html", "sentence-sketchbook.html", "01_one_glance_speaking_flowchart.html", "02_complete_speaking_learning_infographic.html", "think-ai-review.js", "speakwell-auto-scroll.js"];
+const CACHE = "speakwell-v25";
+const CORE = ["./", "index.html", "app.js", "data-grammar.js", "data-speak.js", "data-write.js", "analysis.js", "manifest.json", "icon.svg", "icon-192.png", "icon-512.png", "icon-maskable-192.png", "icon-maskable-512.png", "spoken-english.html", "sentence-sketchbook.html", "01_one_glance_speaking_flowchart.html", "02_complete_speaking_learning_infographic.html", "think-ai-review.js", "speakwell-auto-scroll.js", "sketch-quick-nav.js"];
 self.addEventListener("install", e => {
   // cache each file on its own so one failure can't block installing the app
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(CORE.map(u => c.add(new Request(u, { cache: "reload" })).catch(() => null)))).then(() => self.skipWaiting()));
